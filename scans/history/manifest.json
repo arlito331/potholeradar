@@ -1,0 +1,13 @@
+[
+  {
+    "scan_id": "PR-20260705-191342",
+    "country": "Panama",
+    "city": "Panama City",
+    "center_lat": 8.9823792,
+    "center_lng": -79.51986959999999,
+    "radius_km": 1.0,
+    "scan_time": "2026-07-05T19:13:42Z",
+    "points_scanned": 20,
+    "potholes_found": 0
+  }
+]

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PotholeRadar — Proactive Road Intelligence</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%230b0e14'/%3E%3Ccircle cx='16' cy='16' r='12.5' fill='none' stroke='%233f7fe0' stroke-opacity='.35' stroke-width='1.4'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%233f7fe0' stroke-opacity='.28' stroke-width='1.2'/%3E%3Cline x1='2' y1='16' x2='30' y2='16' stroke='%233f7fe0' stroke-opacity='.18'/%3E%3Cline x1='16' y1='2' x2='16' y2='30' stroke='%233f7fe0' stroke-opacity='.18'/%3E%3Cpath d='M16 16 L16 3.5 A12.5 12.5 0 0 1 27.3 22.5 Z' fill='%233f7fe0' fill-opacity='.35'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%233f7fe0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0D0D0D;color:#fff;font-family:-apple-system,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
+.irow{padding:12px 16px;border-bottom:1px solid #1a1a1a;border-left:3px solid transparent;cursor:pointer;transition:background 0.12s;}
+.irow:hover{background:#1f1f1f;}
+.irow.sel{background:#232323;border-left-color:#3F7FE0;}
+#pr-map{width:100%;height:220px;}
+@media(min-width:600px){#pr-map{height:300px;}}
+.leaflet-container{background:#0a1420;}
+.leaflet-control-attribution{display:none;}
+.leaflet-popup-content-wrapper{background:#1A1A1A;border:1px solid #333;border-radius:6px;color:#fff;box-shadow:none;}
+.leaflet-popup-tip{background:#1A1A1A;}
+.leaflet-popup-content{margin:10px 14px;font-size:12px;line-height:1.5;}
+.header{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #262626;background:#1A1A1A;}
+.header-text{flex:1;min-width:0;}
+.header-eyebrow{font-size:9px;letter-spacing:3px;color:#3F7FE0;font-weight:700;margin-bottom:3px;}
+.header-title{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.header-sub{font-size:10px;color:#555;margin-top:2px;}
+.scan-badge{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:4px;background:rgba(63,127,224,0.12);border:1px solid #3F7FE0;font-size:9px;font-weight:700;color:#3F7FE0;letter-spacing:1px;white-space:nowrap;}
+.scan-info{font-size:9px;color:#444;line-height:1.6;margin-top:4px;text-align:right;}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #262626;}
+.stat-box{padding:10px 12px;border-right:1px solid #262626;}
+.stat-box:last-child{border-right:none;}
+.stat-label{font-size:8px;color:#444;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;}
+.stat-val{font-size:22px;font-weight:700;}
+@media(min-width:400px){.stat-val{font-size:26px;}}
+.section-label{padding:9px 16px 5px;font-size:8px;color:#444;letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid #262626;}
+.footer{padding:8px 16px;border-top:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center;background:#1A1A1A;margin-top:auto;}
+.footer-text{font-size:9px;color:#2a2a2a;letter-spacing:1px;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <canvas id="radar" width="72" height="72" style="border-radius:50%;flex-shrink:0;"></canvas>
+  <div class="header-text">
+    <div class="header-eyebrow">POTHOLERADAR · v1.0</div>
+    <div class="header-title" id="header-title">Area Scan Report</div>
+    <div class="header-sub" id="header-sub">Proactive geographic sweep</div>
+  </div>
+  <div style="flex-shrink:0;text-align:right;">
+    <div class="scan-badge">
+      <div id="scan-dot" style="width:6px;height:6px;border-radius:50%;background:#3F7FE0;animation:pulse 1.2s infinite;"></div>
+      <span id="scan-status">LOADING</span>
+    </div>
+    <div id="scan-time" class="scan-info">Fetching...</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-box">
+    <div class="stat-label">Found</div>
+    <div id="stat-total" class="stat-val">—</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Critical</div>
+    <div id="stat-critical" class="stat-val" style="color:#FF3B3B;">—</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Severe</div>
+    <div id="stat-severe" class="stat-val" style="color:#FF3B3B;">—</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Moderate+</div>
+    <div id="stat-other" class="stat-val" style="color:#3F7FE0;">—</div>
+  </div>
+</div>
+
+<div class="section-label">Scan map — tap pins for details</div>
+<div id="pr-map"></div>
+
+<div id="list-header" class="section-label" style="padding-top:9px;">Loading findings...</div>
+<div id="finding-list" style="flex:1;"></div>
+
+<div class="footer">
+  <span class="footer-text">POWERFIX · REPAIR. REINVENTED.</span>
+  <span class="footer-text">PR v1.0</span>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SEVERITY_COLOR={critical:'#FF3B3B',severe:'#FF3B3B',moderate:'#3F7FE0',minor:'#F0A030',none:'#888'};
+const RAW_URL='https://raw.githubusercontent.com/arlito331/potholeradar/main/scans/latest_scan.json';
+
+let findings=[],scanMeta={},selected=null,prmap=null,markers={};
+
+function sc(s){return SEVERITY_COLOR[s]||'#888';}
+
+function fmt(iso){
+  if(!iso) return '';
+  try{
+    const d=new Date(iso);
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+
+      ' · '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+  }catch(e){return String(iso).slice(0,16).replace('T',' ');}
+}
+
+function buildList(data){
+  const raw=data.findings||[];
+  return raw.map((r,i)=>({...r,_key:String(i)})).filter(r=>r.lat&&r.lng);
+}
+
+function makeIcon(severity,active){
+  const color=sc(severity);
+  const r=active?10:7;
+  const ring=active?`<circle cx="18" cy="18" r="15" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.4"/>`:'';
+  return L.divIcon({
+    html:`<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">${ring}<circle cx="18" cy="18" r="${r}" fill="${color}"/><text x="18" y="22" text-anchor="middle" fill="#fff" font-size="8" font-weight="700" font-family="monospace">${(severity||'?')[0].toUpperCase()}</text></svg>`,
+    className:'',iconSize:[36,36],iconAnchor:[18,18]
+  });
+}
+
+function renderStats(){
+  document.getElementById('stat-total').textContent=findings.length;
+  document.getElementById('stat-critical').textContent=findings.filter(f=>f.severity==='critical').length;
+  document.getElementById('stat-severe').textContent=findings.filter(f=>f.severity==='severe').length;
+  document.getElementById('stat-other').textContent=findings.filter(f=>f.severity==='moderate'||f.severity==='minor').length;
+  document.getElementById('list-header').textContent=findings.length+' pothole'+(findings.length!==1?'s':'')+' found';
+}
+
+function renderList(){
+  const el=document.getElementById('finding-list');
+  if(!findings.length){
+    el.innerHTML='<div style="padding:20px 16px;font-size:12px;color:#555;text-align:center;">No potholes found in this scan</div>';
+    return;
+  }
+  el.innerHTML=findings.map(f=>{
+    const color=sc(f.severity);
+    const desc=f.description||'Pothole detected';
+    const isSel=selected&&selected._key===f._key;
+    return `<div class="irow ${isSel?'sel':''}" onclick="selectFinding('${f._key}')">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px;">
+        <span style="font-size:9px;font-weight:700;letter-spacing:2px;color:${color};border:1px solid ${color};border-radius:3px;padding:1px 6px;text-transform:uppercase;">${f.severity||'?'}</span>
+        <span style="font-size:9px;color:#444;margin-left:auto;">${f.confidence_visual||0}% confidence</span>
+      </div>
+      <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:4px;color:#fff;">${desc.length>90?desc.slice(0,90)+'…':desc}</div>
+      <div style="font-size:10px;color:#555;margin-bottom:5px;">Ø${f.estimated_diameter_m||0}m · ${f.estimated_depth_cm||0}cm deep · risk: ${f.accident_risk||'?'}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectFinding(key){
+  selected=findings.find(f=>f._key===String(key));
+  if(!selected) return;
+  renderList();
+  Object.entries(markers).forEach(([k,m])=>{
+    const f=findings.find(x=>x._key===k);
+    if(f) m.setIcon(makeIcon(f.severity,k===String(key)));
+  });
+  if(markers[key]&&prmap){
+    prmap.setView([selected.lat,selected.lng],16,{animate:true,duration:0.5});
+    markers[key].openPopup();
+  }
+}
+window.selectFinding=selectFinding;
+
+function initMap(centerLat,centerLng){
+  prmap=L.map('pr-map',{zoomControl:false,attributionControl:false}).setView([centerLat||8.997,centerLng||-79.62],13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd'}).addTo(prmap);
+  L.control.zoom({position:'bottomright'}).addTo(prmap);
+  findings.forEach(f=>{
+    if(!f.lat||!f.lng) return;
+    const color=sc(f.severity);
+    const desc=(f.description||'Pothole detected').slice(0,70);
+    const m=L.marker([f.lat,f.lng],{icon:makeIcon(f.severity,false)})
+      .addTo(prmap)
+      .bindPopup(`<div style="font-size:10px;letter-spacing:2px;color:${color};font-weight:700;margin-bottom:4px;text-transform:uppercase;">${f.severity||'?'} · Ø${f.estimated_diameter_m||0}m</div><div style="font-size:12px;font-weight:500;color:#fff;margin-bottom:3px;">${desc}${desc.length>=70?'…':''}</div><div style="font-size:10px;color:#777;">${f.location_in_frame||''} · accident risk: ${f.accident_risk||'?'}</div><a href="${f.maps_link||''}" style="display:inline-block;margin-top:6px;font-size:10px;color:${color};" target="_blank">Open in Google Maps →</a>`,{maxWidth:220});
+    m.on('click',()=>selectFinding(f._key));
+    markers[f._key]=m;
+  });
+}
+
+function drawRadar(){
+  const c=document.getElementById('radar');
+  const ctx=c.getContext('2d');
+  const sz=72,cx=sz/2,cy=sz/2,rad=sz/2-3;
+  let angle=0;
+  const blips=[{a:0.9,d:0.52},{a:2.3,d:0.68},{a:4.2,d:0.40},{a:5.1,d:0.58}];
+  function draw(){
+    ctx.clearRect(0,0,sz,sz);
+    ctx.beginPath();ctx.arc(cx,cy,rad,0,Math.PI*2);ctx.fillStyle='#0f0f0f';ctx.fill();
+    ctx.strokeStyle='#3F7FE0';ctx.lineWidth=1.5;ctx.stroke();
+    [0.3,0.6,1].forEach(f=>{
+      ctx.beginPath();ctx.arc(cx,cy,rad*f,0,Math.PI*2);
+      ctx.strokeStyle='rgba(63,127,224,0.12)';ctx.lineWidth=0.5;ctx.stroke();
+    });
+    ctx.strokeStyle='rgba(63,127,224,0.1)';ctx.lineWidth=0.5;
+    ctx.beginPath();ctx.moveTo(cx,cy-rad);ctx.lineTo(cx,cy+rad);ctx.moveTo(cx-rad,cy);ctx.lineTo(cx+rad,cy);ctx.stroke();
+    for(let i=0;i<55;i++){
+      const a=angle-Math.PI*0.65+(i/55)*Math.PI*0.65;
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,rad-1,a,a+0.065);ctx.closePath();
+      ctx.fillStyle=`rgba(63,127,224,${(i/55)*0.28})`;ctx.fill();
+    }
+    ctx.beginPath();ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(angle)*(rad-1),cy+Math.sin(angle)*(rad-1));
+    ctx.strokeStyle='#3F7FE0';ctx.lineWidth=1.5;ctx.stroke();
+    blips.forEach(b=>{
+      const diff=((angle-b.a)%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
+      if(diff<Math.PI*0.7){
+        const al=1-diff/(Math.PI*0.7);
+        const bx=cx+Math.cos(b.a)*rad*b.d,by=cy+Math.sin(b.a)*rad*b.d;
+        ctx.beginPath();ctx.arc(bx,by,3,0,Math.PI*2);ctx.fillStyle=`rgba(255,80,80,${al})`;ctx.fill();
+        if(al>0.4){ctx.beginPath();ctx.arc(bx,by,6,0,Math.PI*2);ctx.strokeStyle=`rgba(255,80,80,${(al-0.4)*0.6})`;ctx.lineWidth=0.8;ctx.stroke();}
+      }
+    });
+    ctx.beginPath();ctx.arc(cx,cy,2.5,0,Math.PI*2);ctx.fillStyle='#3F7FE0';ctx.fill();
+    angle+=0.02;requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+async function loadData(){
+  try{
+    const res=await fetch(RAW_URL+'?t='+Date.now());
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    scanMeta=data;
+    findings=buildList(data);
+    document.getElementById('header-title').textContent=(data.city||'Area')+', '+(data.country||'');
+    document.getElementById('header-sub').textContent=(data.radius_km||'?')+'km radius · '+(data.points_scanned||0)+'/'+(data.points_total||0)+' points scanned';
+    document.getElementById('scan-status').textContent='LIVE';
+    document.getElementById('scan-time').innerHTML=
+      (data.scan_time?'Last: '+fmt(data.scan_time)+'<br/>':'')+
+      findings.length+' pothole'+(findings.length!==1?'s':'')+' found';
+    renderStats();
+    renderList();
+    initMap(data.center_lat,data.center_lng);
+    if(findings.length>0) selectFinding(findings[0]._key);
+  }catch(e){
+    document.getElementById('scan-status').textContent='OFFLINE';
+    document.getElementById('scan-dot').style.cssText='width:6px;height:6px;border-radius:50%;background:#888;';
+    document.getElementById('scan-time').textContent='Could not fetch live data';
+    document.getElementById('list-header').textContent='No scan data yet — run the workflow first';
+    initMap();
+    console.error('PotholeRadar fetch error:',e);
+  }
+}
+
+drawRadar();
+loadData();
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+name: PotholeRadar Scan
+on:
+  workflow_dispatch:
+    inputs:
+      country:
+        description: 'Country to scan'
+        required: true
+        type: string
+        default: 'Panama'
+      city:
+        description: 'City to scan (geocoded to a center point)'
+        required: true
+        type: string
+        default: 'Panama City'
+      radius_km:
+        description: 'Scan radius in km around the city center'
+        required: true
+        type: string
+        default: '3'
+      max_points:
+        description: 'Safety cap on grid points scanned (hard ceiling 500)'
+        required: true
+        type: string
+        default: '150'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+        run: |
+          python potholeradar.py \
+            --country "${{ inputs.country }}" \
+            --city "${{ inputs.city }}" \
+            --radius-km "${{ inputs.radius_km }}" \
+            --max-points "${{ inputs.max_points }}"
+      - name: Commit scan report
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add scans/ || true
+          git diff --staged --quiet || git commit -m "scan: ${{ inputs.city }}, ${{ inputs.country }} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push || true
+      - name: Purge jsDelivr cache
+        run: |
+          curl -s "https://purge.jsdelivr.net/gh/arlito331/potholeradar@main/scans/latest_scan.json" || true

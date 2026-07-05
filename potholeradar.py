@@ -163,8 +163,12 @@ def streetview_has_coverage(lat, lng, google_key):
             params={"location": f"{lat},{lng}", "key": google_key},
             timeout=10,
         )
-        return r.status_code == 200 and r.json().get("status") == "OK"
-    except Exception:
+        status = r.json().get("status") if r.status_code == 200 else f"HTTP {r.status_code}"
+        if status != "OK":
+            print(f"    (metadata status: {status})", end=" ")
+        return status == "OK"
+    except Exception as e:
+        print(f"    (metadata request failed: {e})", end=" ")
         return False
 
 

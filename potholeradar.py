@@ -445,6 +445,24 @@ def main():
     with open(os.path.join(HISTORY_DIR, f"{scan_id}.json"), "w") as fh:
         json.dump(scan, fh, indent=2)
 
+    manifest_path = os.path.join(HISTORY_DIR, "manifest.json")
+    manifest = []
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path) as fh:
+                manifest = json.load(fh)
+        except Exception:
+            manifest = []
+    manifest.append({
+        "scan_id": scan_id,
+        "country": args.country, "city": args.city,
+        "center_lat": center_lat, "center_lng": center_lng, "radius_km": args.radius_km,
+        "scan_time": scan["scan_time"],
+        "points_scanned": points_scanned, "potholes_found": len(findings),
+    })
+    with open(manifest_path, "w") as fh:
+        json.dump(manifest, fh, indent=2)
+
     print(f"\n✅ Scan complete: {len(findings)} pothole(s) found, {points_scanned} scanned, {points_skipped} skipped, {len(errors)} error(s)")
 
     if findings:

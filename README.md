@@ -10,17 +10,19 @@ Part of the PowerFix tool family: [PotholeWatch](https://github.com/arlito331/po
 2. Generate a grid of scan points covering the given radius, spaced ~130m apart, capped at `max_points` (default 150, hard ceiling 500).
 3. For each point: check Street View **metadata** first (free) to skip points with no panorama coverage, then fetch 5 Street View images (N/E/S/W headings + downward tilt).
 4. Send all 5 images to Claude Vision with a strict "true pothole vs. damaged road" prompt — only confirmed potholes (a real hole with exposed base material, not cracks/patches/wear) are recorded.
-5. Write `scans/latest_scan.json` (+ an archived copy in `scans/history/`), and email an HTML digest of findings if any were confirmed.
-6. `index.html` (GitHub Pages) is a Leaflet dashboard that reads `scans/latest_scan.json` and plots findings on a map.
+5. Write `scans/latest_scan.json` + an archived copy and a manifest entry in `scans/history/`, and email an HTML digest of findings if any were confirmed.
+6. `index.html` (GitHub Pages) is the app: a **New Scan** tab that triggers a scan directly from the browser, and a **Coverage Map** tab showing every scanned area across Latin America, with drill-down into each scan's individual findings.
 
 ## Running a scan
 
-Scans are triggered manually via GitHub Actions — go to **Actions → PotholeRadar Scan → Run workflow** and fill in:
+The live app at `arlito331.github.io/potholeradar/` is the normal way to trigger a scan:
 
-- `country` — e.g. `Panama`
-- `city` — e.g. `Panama City`
-- `radius_km` — scan radius around the city center
-- `max_points` — safety cap on grid points scanned (keeps cost/time bounded; hard ceiling is 500 regardless of what's entered)
+1. On the **New Scan** tab, click "Set token" once and paste a GitHub personal access token with **`repo`** + **`workflow`** scope (stored only in your browser's localStorage — never sent anywhere except `api.github.com`).
+2. Pick country, city, radius (km), and max points.
+3. Click **"Run Scan →"**. The page calls GitHub's `workflow_dispatch` API directly, then polls the run's status live until it completes, with a link to the full GitHub Actions log the whole time.
+4. Once complete, switch to **Coverage Map** to see it plotted, or click "View on Coverage Map" from the success message.
+
+This calls the same GitHub Actions workflow you can also trigger manually from **Actions → PotholeRadar Scan → Run workflow** on GitHub itself, with the same inputs (`country`, `city`, `radius_km`, `max_points`) — the app is just a nicer front door to it, not a separate system.
 
 To run locally instead:
 

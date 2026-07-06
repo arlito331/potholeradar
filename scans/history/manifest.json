@@ -9,5 +9,16 @@
     "scan_time": "2026-07-05T19:13:42Z",
     "points_scanned": 20,
     "potholes_found": 0
+  },
+  {
+    "scan_id": "PR-20260706-002900",
+    "country": "Panama",
+    "city": "Punta Pac\u00edfica, San Francisco, Distrito de Panam\u00e1",
+    "center_lat": 8.9764382,
+    "center_lng": -79.5079439,
+    "radius_km": 0.7,
+    "scan_time": "2026-07-06T00:29:00Z",
+    "points_scanned": 9,
+    "potholes_found": 1
   }
 ]

@@ -182,26 +182,30 @@ def streetview_has_coverage(lat, lng, google_key):
 
 def fetch_street_view_angles(lat, lng, google_key):
     """
-    Fetch Street View imagery: 4 wide establishing shots (for orientation/
-    context) + 4 closer, steeper-pitched shots at the same headings (to
-    actually resolve pavement-scale detail) + one steep straight-down shot.
+    Fetch ONLY close-in pavement shots — no wide establishing shots.
 
-    A wide 90 FOV at a shallow pitch (looking toward the horizon) is good
-    for orienting which way the road runs, but a 0.3-0.8m pothole is tiny
-    within that frame — a human inspecting Street View tilts down and
-    effectively zooms in on the pavement itself, which the narrower-FOV/
-    steeper-pitch shots here are meant to approximate.
+    A real failure case proved wide 90 FOV shots are unreliable for this:
+    the model "confirmed" a pothole based on a wide shot where the claimed
+    damage was a barely-resolvable dark smudge far in the distance near a
+    gas station entrance — impossible to actually verify at that size, and
+    almost certainly not real. A human inspecting Street View pans/zooms in
+    close on the pavement itself; a wide shot is the equivalent of judging
+    a road from a car window at highway speed. So every shot here is now
+    narrow-FOV and steeply pitched down at the road surface, all 8
+    directions plus one very steep straight-down view — orientation
+    context is a secondary concern next to actually being able to see
+    what's being judged.
     """
     angles = [
-        {"heading": 0,   "pitch": -15, "fov": 90, "label": "North (wide)"},
-        {"heading": 90,  "pitch": -15, "fov": 90, "label": "East (wide)"},
-        {"heading": 180, "pitch": -15, "fov": 90, "label": "South (wide)"},
-        {"heading": 270, "pitch": -15, "fov": 90, "label": "West (wide)"},
-        {"heading": 0,   "pitch": -45, "fov": 50, "label": "North (close)"},
-        {"heading": 90,  "pitch": -45, "fov": 50, "label": "East (close)"},
-        {"heading": 180, "pitch": -45, "fov": 50, "label": "South (close)"},
-        {"heading": 270, "pitch": -45, "fov": 50, "label": "West (close)"},
-        {"heading": 0,   "pitch": -80, "fov": 60, "label": "Down"},
+        {"heading": 0,   "pitch": -50, "fov": 40, "label": "North (close)"},
+        {"heading": 45,  "pitch": -50, "fov": 40, "label": "Northeast (close)"},
+        {"heading": 90,  "pitch": -50, "fov": 40, "label": "East (close)"},
+        {"heading": 135, "pitch": -50, "fov": 40, "label": "Southeast (close)"},
+        {"heading": 180, "pitch": -50, "fov": 40, "label": "South (close)"},
+        {"heading": 225, "pitch": -50, "fov": 40, "label": "Southwest (close)"},
+        {"heading": 270, "pitch": -50, "fov": 40, "label": "West (close)"},
+        {"heading": 315, "pitch": -50, "fov": 40, "label": "Northwest (close)"},
+        {"heading": 0,   "pitch": -85, "fov": 50, "label": "Down"},
     ]
     images = []
     for angle in angles:
@@ -302,6 +306,13 @@ shadows, or discoloration alone. You don't need every listed criterion
 (jagged edges, exact color, exact size) to be textbook-perfect, but the
 core fact — there is a real hole, not just surface wear or water —
 must be something you can directly point to in the image, not guess at.
+
+Distance matters: only confirm a pothole in the near-to-middle part of
+the frame, close enough that its edges, depth, and base material are
+actually resolvable as distinct details — not a small dark patch or
+smudge far in the background that you're guessing might be a hole. If
+something is too far away or too small in frame to be sure, don't
+confirm it, and don't let it inflate confidence_visual either.
 
 Respond ONLY in this JSON format:
 {{

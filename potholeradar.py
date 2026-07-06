@@ -61,6 +61,7 @@ SEVERITY_COLORS = {
 DEFAULT_SPACING_M  = 130
 DEFAULT_MAX_POINTS = 150
 HARD_MAX_POINTS    = 500
+MAX_FINDINGS       = 20  # test-round cap: stop scanning once this many potholes are confirmed
 
 SCAN_DIR    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scans")
 HISTORY_DIR = os.path.join(SCAN_DIR, "history")
@@ -319,10 +320,10 @@ def build_digest(scan):
     return f"""<!DOCTYPE html><html><body style="font-family:-apple-system,Helvetica,Arial,sans-serif;background:{BG};padding:24px;color:{TEXT};margin:0;">
 <div style="max-width:720px;margin:auto;">
   <div style="margin-bottom:24px;padding:24px;background:{CARD_BG};border-radius:8px;border-top:4px solid {ACCENT};">
-    <div style="font-size:11px;letter-spacing:4px;color:{ACCENT};font-weight:700;">POTHOLERADAR · v1.0</div>
+    <div style="font-size:11px;letter-spacing:4px;color:{ACCENT};font-weight:700;">POTHOLERADAR · v1.2</div>
     <h1 style="margin:10px 0 6px;font-size:26px;color:{TEXT};font-weight:700;">{count} pothole{'s' if count != 1 else ''} found</h1>
     <div style="color:{MUTED};font-size:12px;margin-top:6px;">
-      {scan['city']}, {scan['country']} · {scan['radius_km']}km radius scan ·
+      {scan['city']}, {scan['country']} · {scan['radius_km']}km radius ·
       {scan['points_scanned']}/{scan['points_total']} points scanned ({scan['points_skipped_no_coverage']} skipped, no Street View coverage)
     </div>
   </div>
@@ -355,24 +356,31 @@ def send_email(subject, html_body):
 def main():
     parser = argparse.ArgumentParser(description="PotholeRadar — proactive geographic pothole scanner")
     parser.add_argument("--country", required=True)
-    parser.add_argument("--city", required=True)
+    parser.add_argument("--city", default="", help="Display label for the scanned area (e.g. a searched landmark/neighborhood name)")
     parser.add_argument("--radius-km", type=float, default=3)
     parser.add_argument("--max-points", type=int, default=DEFAULT_MAX_POINTS)
     parser.add_argument("--spacing-m", type=float, default=DEFAULT_SPACING_M)
+    parser.add_argument("--lat", default="", help="Center latitude, if already resolved (e.g. from a map search) — skips geocoding")
+    parser.add_argument("--lng", default="", help="Center longitude, if already resolved — skips geocoding")
     args = parser.parse_args()
 
     max_points = min(args.max_points, HARD_MAX_POINTS)
     scan_time = datetime.now(timezone.utc)
     scan_id = f"PR-{scan_time.strftime('%Y%m%d-%H%M%S')}"
+    area_label = args.city or f"{args.lat}, {args.lng}"
 
-    print(f"🔵 PotholeRadar scan {scan_id} — {args.city}, {args.country} ({args.radius_km}km radius, max {max_points} points)")
+    print(f"🔵 PotholeRadar scan {scan_id} — {area_label}, {args.country} ({args.radius_km}km radius, max {max_points} points)")
 
-    center_lat, center_lng, formatted = geocode_city(args.city, args.country, GOOGLE_MAPS_API_KEY)
-    if center_lat is None:
-        print(f"❌ Could not geocode '{args.city}, {args.country}' — aborting.")
-        return
-
-    print(f"📍 Center: {center_lat:.5f}, {center_lng:.5f} ({formatted})")
+    if args.lat and args.lng:
+        center_lat, center_lng = float(args.lat), float(args.lng)
+        print(f"📍 Center (from map search): {center_lat:.5f}, {center_lng:.5f} ({area_label})")
+    else:
+        center_lat, center_lng, formatted = geocode_city(args.city, args.country, GOOGLE_MAPS_API_KEY)
+        if center_lat is None:
+            print(f"❌ Could not geocode '{args.city}, {args.country}' — aborting.")
+            return
+        area_label = formatted
+        print(f"📍 Center: {center_lat:.5f}, {center_lng:.5f} ({formatted})")
 
     points = generate_grid(center_lat, center_lng, args.radius_km, args.spacing_m, max_points)
     print(f"🗺️  Grid: {len(points)} points to check")
@@ -416,6 +424,9 @@ def main():
                     "street_view_image_b64": best_b64,
                     "maps_link": f"https://maps.google.com/?q={lat},{lng}",
                 })
+                if len(findings) >= MAX_FINDINGS:
+                    print(f"\n🛑 Reached the {MAX_FINDINGS}-finding test cap — stopping the scan early.")
+                    break
             else:
                 print("clear")
         except Exception as e:
@@ -427,7 +438,7 @@ def main():
 
     scan = {
         "scan_id": scan_id,
-        "country": args.country, "city": args.city,
+        "country": args.country, "city": area_label,
         "center_lat": center_lat, "center_lng": center_lng, "radius_km": args.radius_km,
         "grid_spacing_m": args.spacing_m, "max_points": max_points,
         "scan_time": scan_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -455,7 +466,7 @@ def main():
             manifest = []
     manifest.append({
         "scan_id": scan_id,
-        "country": args.country, "city": args.city,
+        "country": args.country, "city": area_label,
         "center_lat": center_lat, "center_lng": center_lng, "radius_km": args.radius_km,
         "scan_time": scan["scan_time"],
         "points_scanned": points_scanned, "potholes_found": len(findings),
@@ -466,7 +477,7 @@ def main():
     print(f"\n✅ Scan complete: {len(findings)} pothole(s) found, {points_scanned} scanned, {points_skipped} skipped, {len(errors)} error(s)")
 
     if findings:
-        subject = f"PotholeRadar: {len(findings)} pothole(s) found in {args.city}, {args.country}"
+        subject = f"PotholeRadar: {len(findings)} pothole(s) found in {area_label}, {args.country}"
         send_email(subject, build_digest(scan))
         print("📧 Email digest sent")
 

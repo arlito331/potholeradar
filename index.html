@@ -54,7 +54,7 @@ a{color:inherit;}
 .status-panel.error{border-left-color:var(--red);}
 .status-panel.success{border-left-color:#4ADE80;}
 
-#coverage-map,#detail-map{width:100%;height:280px;border-radius:8px;overflow:hidden;}
+#coverage-map,#detail-map,#scan-map{width:100%;height:280px;border-radius:8px;overflow:hidden;}
 .leaflet-container{background:#0a1420;}
 .leaflet-control-attribution{display:none;}
 .leaflet-popup-content-wrapper{background:var(--panel);border:1px solid var(--border);border-radius:6px;color:#fff;box-shadow:none;}
@@ -83,9 +83,9 @@ a{color:inherit;}
 <div class="header">
   <div class="radar-wrap" id="header-radar"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="none" stroke="#3F7FE0" stroke-opacity=".3" stroke-width="1"/><circle cx="22" cy="22" r="12" fill="none" stroke="#3F7FE0" stroke-opacity=".2" stroke-width="1"/><circle cx="22" cy="22" r="2" fill="#3F7FE0"/></svg></div>
   <div class="header-text">
-    <div class="header-eyebrow">POTHOLERADAR · v1.1</div>
+    <div class="header-eyebrow">POTHOLERADAR · v1.2</div>
     <div class="header-title">Area Scanner</div>
-    <div class="header-sub">Country → city → radius → boom</div>
+    <div class="header-sub">Search a place → adjust radius → boom</div>
   </div>
 </div>
 
@@ -113,21 +113,27 @@ a{color:inherit;}
         <option>Nicaragua</option><option>Brazil</option><option>Other</option>
       </select>
     </div>
+
     <div class="field">
-      <label>City</label>
-      <input type="text" id="fCity" placeholder="e.g. David"/>
-    </div>
-    <div class="field-row">
-      <div class="field">
-        <label>Radius (km)</label>
-        <input type="number" id="fRadius" value="2" min="0.2" step="0.5"/>
+      <label>Search a place (landmark, neighborhood, address — anything you recognize)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="fSearch" placeholder="e.g. McDonald's Via España, or El Cangrejo" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlace();}"/>
+        <button class="btn secondary" style="white-space:nowrap;" onclick="searchPlace()">Search</button>
       </div>
-      <div class="field">
-        <label>Max points</label>
-        <input type="number" id="fMaxPoints" value="100" min="10" max="500"/>
-      </div>
+      <div class="hint" id="searchHint">Or just click anywhere on the map to drop the pin there.</div>
     </div>
-    <div class="hint">Each point costs up to 5 Street View fetches + 1 Claude Vision call. Start small (~1-2km, 50-100 points) to gauge cost.</div>
+
+    <div id="scan-map" style="margin:10px 0;"></div>
+
+    <div class="field">
+      <label>Radius: <span id="radiusVal">2.0</span> km</label>
+      <input type="range" id="fRadius" min="0.2" max="5" step="0.1" value="2" style="width:100%;" oninput="onRadiusInput()"/>
+    </div>
+    <div class="field">
+      <label>Max points</label>
+      <input type="number" id="fMaxPoints" value="100" min="10" max="500"/>
+    </div>
+    <div class="hint">Each point costs up to 5 Street View fetches + 1 Claude Vision call. Start small (~50-100 points) to gauge cost. Findings are capped at 20 per scan for now.</div>
     <button class="btn" id="runBtn" style="margin-top:16px;width:100%;padding:12px;font-size:12px;" onclick="runScan()">🔵 Run Scan →</button>
 
     <div class="status-panel" id="statusPanel">
@@ -173,6 +179,72 @@ const HISTORY_URL  = (id) => `https://raw.githubusercontent.com/${REPO_OWNER}/${
 
 const SEVERITY_COLOR = {critical:'#FF3B3B',severe:'#FF3B3B',moderate:'#3F7FE0',minor:'#F0A030',none:'#888'};
 
+// ═══════════════════════════ SCAN AREA: MAP + SEARCH + RADIUS ═══════════════════════════
+// Nominatim's /search endpoint sends Access-Control-Allow-Origin: * (confirmed —
+// unlike /lookup, which sends no CORS headers at all), so this can call it
+// directly from the browser for free, no API key needed.
+
+let scanMap = null, scanMarker = null, scanCircle = null, lastSearchLabel = '';
+const DEFAULT_CENTER = [8.9824, -79.5199]; // Panama City, just an initial view
+
+function initScanMap(){
+  if (scanMap) return;
+  scanMap = L.map('scan-map', {zoomControl:true, attributionControl:false}).setView(DEFAULT_CENTER, 13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19, subdomains:'abcd'}).addTo(scanMap);
+
+  scanMarker = L.marker(DEFAULT_CENTER, {draggable:true}).addTo(scanMap);
+  scanCircle = L.circle(DEFAULT_CENTER, {radius: 2000, color:'#3F7FE0', fillColor:'#3F7FE0', fillOpacity:0.12, weight:2}).addTo(scanMap);
+
+  scanMarker.on('drag', (e) => { scanCircle.setLatLng(e.target.getLatLng()); });
+  scanMarker.on('dragend', () => { lastSearchLabel = ''; updateSearchHint(); });
+  scanMap.on('click', (e) => {
+    scanMarker.setLatLng(e.latlng);
+    scanCircle.setLatLng(e.latlng);
+    lastSearchLabel = '';
+    updateSearchHint();
+  });
+}
+
+function updateSearchHint(){
+  const hint = document.getElementById('searchHint');
+  hint.textContent = lastSearchLabel
+    ? `Centered on: ${lastSearchLabel}`
+    : 'Or just click anywhere on the map to drop the pin there.';
+}
+
+function onRadiusInput(){
+  const km = parseFloat(document.getElementById('fRadius').value);
+  document.getElementById('radiusVal').textContent = km.toFixed(1);
+  if (scanCircle) scanCircle.setRadius(km * 1000);
+}
+
+async function searchPlace(){
+  const query = document.getElementById('fSearch').value.trim();
+  if (!query) return;
+  const country = document.getElementById('fCountry').value;
+  const hint = document.getElementById('searchHint');
+  hint.textContent = 'Searching…';
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', ' + country)}&format=json&limit=1`
+    );
+    const results = await res.json();
+    if (!results.length){
+      hint.textContent = `No results for "${query}" — try a different search, or click the map directly.`;
+      return;
+    }
+    const { lat, lon, display_name } = results[0];
+    const latlng = [parseFloat(lat), parseFloat(lon)];
+    scanMap.setView(latlng, 15);
+    scanMarker.setLatLng(latlng);
+    scanCircle.setLatLng(latlng);
+    lastSearchLabel = display_name.split(',').slice(0,3).join(',');
+    updateSearchHint();
+  } catch (e){
+    hint.textContent = 'Search failed — try again, or click the map directly.';
+  }
+}
+
 function getGhToken(){ return localStorage.getItem('pr_gh_token'); }
 function setGhToken(t){ localStorage.setItem('pr_gh_token', t); }
 
@@ -199,6 +271,7 @@ function switchTab(name){
     document.getElementById('view-'+t).classList.toggle('active', t===name);
   });
   if (name === 'coverage') loadCoverage();
+  if (name === 'scan' && scanMap) setTimeout(() => scanMap.invalidateSize(), 0);
 }
 
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
@@ -230,19 +303,26 @@ async function runScan(){
   if (!getGhToken()) { promptForToken(); if (!getGhToken()) return; }
 
   const country = document.getElementById('fCountry').value;
-  const city = document.getElementById('fCity').value.trim();
-  const radiusKm = document.getElementById('fRadius').value;
   const maxPoints = document.getElementById('fMaxPoints').value;
-  if (!city) { alert('Enter a city.'); return; }
+  const radiusKm = document.getElementById('fRadius').value;
+  const latlng = scanMarker.getLatLng();
+  const cityLabel = lastSearchLabel || `Custom point (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
+
+  const inputs = {
+    country, city: cityLabel, radius_km: String(radiusKm),
+    lat: String(latlng.lat), lng: String(latlng.lng),
+    max_points: String(maxPoints),
+  };
+  const label = `${cityLabel}, ${country} · ${radiusKm}km`;
 
   document.getElementById('runBtn').disabled = true;
   const dispatchTime = new Date().toISOString();
-  setStatus('', 'Dispatching…', `${city}, ${country} · ${radiusKm}km · max ${maxPoints} points`);
+  setStatus('', 'Dispatching…', `${label} · max ${maxPoints} points`);
 
   try {
     const dispatchRes = await ghFetch(
       `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
-      { method:'POST', body: JSON.stringify({ ref:'main', inputs:{ country, city, radius_km:String(radiusKm), max_points:String(maxPoints) } }) }
+      { method:'POST', body: JSON.stringify({ ref:'main', inputs }) }
     );
     if (dispatchRes.status !== 204) {
       const e = await dispatchRes.json().catch(()=>({}));
@@ -304,6 +384,10 @@ async function loadCoverage(){
   renderScanList();
 }
 
+function scanAreaLabel(s){
+  return s.barrio || s.corregimiento || s.district || s.city || '';
+}
+
 function renderCoverageMap(){
   const el = document.getElementById('coverage-map');
   if (coverageMap) { coverageMap.remove(); coverageMap = null; }
@@ -319,8 +403,8 @@ function renderCoverageMap(){
       fillColor: found ? '#FF3B3B' : '#3F7FE0',
       fillOpacity: 0.15, weight: 1.5,
     }).addTo(coverageMap);
-    circle.bindPopup(`<div style="font-size:12px;font-weight:700;margin-bottom:4px;">${s.city}, ${s.country}</div>
-      <div style="font-size:10px;color:#999;margin-bottom:6px;">${s.radius_km}km radius · ${s.points_scanned||0} points scanned</div>
+    circle.bindPopup(`<div style="font-size:12px;font-weight:700;margin-bottom:4px;">${scanAreaLabel(s)}, ${s.country}</div>
+      <div style="font-size:10px;color:#999;margin-bottom:6px;">~${s.radius_km}km · ${s.points_scanned||0} points scanned</div>
       <div style="font-size:11px;color:${found?'#FF3B3B':'#3F7FE0'};font-weight:700;">${s.potholes_found||0} pothole${s.potholes_found!==1?'s':''} found</div>
       <a href="#" onclick="viewScanDetail('${s.scan_id}');return false;" style="display:inline-block;margin-top:6px;font-size:10px;color:#3F7FE0;">View findings →</a>`);
   });
@@ -338,8 +422,8 @@ function renderScanList(){
     const date = s.scan_time ? new Date(s.scan_time).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
     return `<div class="scan-row" onclick="viewScanDetail('${s.scan_id}')">
       <div class="scan-row-main">
-        <div class="scan-row-title">${s.city}, ${s.country}</div>
-        <div class="scan-row-sub">${date} · ${s.radius_km}km radius · ${s.points_scanned||0} points scanned</div>
+        <div class="scan-row-title">${scanAreaLabel(s)}, ${s.country}</div>
+        <div class="scan-row-sub">${date} · ~${s.radius_km}km · ${s.points_scanned||0} points scanned</div>
       </div>
       <span class="badge ${found?'found':'clean'}">${s.potholes_found||0} found</span>
     </div>`;
@@ -364,6 +448,13 @@ async function viewScanDetail(scanId){
   if (detailMap) { detailMap.remove(); detailMap = null; }
   detailMap = L.map('detail-map', {zoomControl:true, attributionControl:false}).setView([scan.center_lat, scan.center_lng], 14);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19, subdomains:'abcd'}).addTo(detailMap);
+
+  if (scan.boundary && scan.boundary.length){
+    const poly = L.polygon(scan.boundary, {color:'#3F7FE0', weight:2, fillOpacity:0.08}).addTo(detailMap);
+    detailMap.fitBounds(poly.getBounds(), {padding:[20,20]});
+  } else if (scan.radius_km){
+    L.circle([scan.center_lat, scan.center_lng], {radius: scan.radius_km*1000, color:'#3F7FE0', weight:1.5, fillOpacity:0.05}).addTo(detailMap);
+  }
 
   (scan.findings||[]).forEach(f=>{
     const color = SEVERITY_COLOR[f.severity]||'#888';
@@ -399,8 +490,12 @@ window.backToOverview = backToOverview;
 window.switchTab = switchTab;
 window.runScan = runScan;
 window.promptForToken = promptForToken;
+window.searchPlace = searchPlace;
+window.onRadiusInput = onRadiusInput;
 
 refreshTokenBar();
+initScanMap();
+onRadiusInput();
 </script>
 </body>
 </html>

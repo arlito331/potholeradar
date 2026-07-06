@@ -8,20 +8,30 @@ on:
         type: string
         default: 'Panama'
       city:
-        description: 'City to scan (geocoded to a center point)'
+        description: 'Display label for the scanned area (e.g. a searched landmark/neighborhood name)'
         required: true
         type: string
-        default: 'Panama City'
+        default: ''
       radius_km:
-        description: 'Scan radius in km around the city center'
+        description: 'Scan radius in km around the center point'
         required: true
         type: string
-        default: '3'
+        default: '2'
       max_points:
         description: 'Safety cap on grid points scanned (hard ceiling 500)'
         required: true
         type: string
-        default: '150'
+        default: '100'
+      lat:
+        description: 'Center latitude, if already resolved via map search (leave blank to geocode city+country instead)'
+        required: false
+        type: string
+        default: ''
+      lng:
+        description: 'Center longitude, if already resolved via map search'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   scan:
@@ -44,7 +54,9 @@ jobs:
             --country "${{ inputs.country }}" \
             --city "${{ inputs.city }}" \
             --radius-km "${{ inputs.radius_km }}" \
-            --max-points "${{ inputs.max_points }}"
+            --max-points "${{ inputs.max_points }}" \
+            --lat "${{ inputs.lat }}" \
+            --lng "${{ inputs.lng }}"
       - name: Commit scan report
         run: |
           git config user.name "github-actions"

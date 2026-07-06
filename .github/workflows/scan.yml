@@ -60,6 +60,7 @@ jobs:
             --lat "${{ inputs.lat }}" \
             --lng "${{ inputs.lng }}"
       - name: Commit scan report
+        if: always()
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"

@@ -481,9 +481,14 @@ def main():
     print(f"\n✅ Scan complete: {len(findings)} pothole(s) found, {points_scanned} scanned, {points_skipped} skipped, {len(errors)} error(s)")
 
     if findings:
-        subject = f"PotholeRadar: {len(findings)} pothole(s) found in {area_label}, {args.country}"
-        send_email(subject, build_digest(scan))
-        print("📧 Email digest sent")
+        try:
+            subject = f"PotholeRadar: {len(findings)} pothole(s) found in {area_label}, {args.country}"
+            send_email(subject, build_digest(scan))
+            print("📧 Email digest sent")
+        except Exception as e:
+            # The scan results are already written to disk at this point — a
+            # broken email config must never take those down with it.
+            print(f"⚠️  Email digest failed to send (scan results are still saved): {e}")
 
 
 if __name__ == "__main__":

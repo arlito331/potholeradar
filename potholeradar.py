@@ -58,7 +58,10 @@ SEVERITY_COLORS = {
     "minor":    "#F0A030",
 }
 
-DEFAULT_SPACING_M  = 130
+DEFAULT_SPACING_M  = 25  # real Street View panoramas run every ~10-15m along a road;
+                          # 130m spacing meant a small targeted scan could easily miss
+                          # the exact spot entirely. max_points still caps the total via
+                          # thinning, so this just makes small-radius scans much denser.
 DEFAULT_MAX_POINTS = 150
 HARD_MAX_POINTS    = 500
 MAX_FINDINGS       = 20  # test-round cap: stop scanning once this many potholes are confirmed
@@ -179,30 +182,35 @@ def streetview_has_coverage(lat, lng, google_key):
 
 def fetch_street_view_angles(lat, lng, google_key):
     """
-    Fetch Street View imagery from 8 compass headings + one downward tilt.
-    8 rather than 4 because the road at a given point can run in any
-    direction — 4 cardinal headings alone can easily miss the direction
-    the road actually faces, showing mostly off-road scenery instead.
+    Fetch Street View imagery: 4 wide establishing shots (for orientation/
+    context) + 4 closer, steeper-pitched shots at the same headings (to
+    actually resolve pavement-scale detail) + one steep straight-down shot.
+
+    A wide 90 FOV at a shallow pitch (looking toward the horizon) is good
+    for orienting which way the road runs, but a 0.3-0.8m pothole is tiny
+    within that frame — a human inspecting Street View tilts down and
+    effectively zooms in on the pavement itself, which the narrower-FOV/
+    steeper-pitch shots here are meant to approximate.
     """
     angles = [
-        {"heading": 0,   "pitch": -20, "label": "North"},
-        {"heading": 45,  "pitch": -20, "label": "Northeast"},
-        {"heading": 90,  "pitch": -20, "label": "East"},
-        {"heading": 135, "pitch": -20, "label": "Southeast"},
-        {"heading": 180, "pitch": -20, "label": "South"},
-        {"heading": 225, "pitch": -20, "label": "Southwest"},
-        {"heading": 270, "pitch": -20, "label": "West"},
-        {"heading": 315, "pitch": -20, "label": "Northwest"},
-        {"heading": 0,   "pitch": -60, "label": "Down"},
+        {"heading": 0,   "pitch": -15, "fov": 90, "label": "North (wide)"},
+        {"heading": 90,  "pitch": -15, "fov": 90, "label": "East (wide)"},
+        {"heading": 180, "pitch": -15, "fov": 90, "label": "South (wide)"},
+        {"heading": 270, "pitch": -15, "fov": 90, "label": "West (wide)"},
+        {"heading": 0,   "pitch": -45, "fov": 50, "label": "North (close)"},
+        {"heading": 90,  "pitch": -45, "fov": 50, "label": "East (close)"},
+        {"heading": 180, "pitch": -45, "fov": 50, "label": "South (close)"},
+        {"heading": 270, "pitch": -45, "fov": 50, "label": "West (close)"},
+        {"heading": 0,   "pitch": -80, "fov": 60, "label": "Down"},
     ]
     images = []
     for angle in angles:
         try:
             r = requests.get(
                 "https://maps.googleapis.com/maps/api/streetview",
-                params={"size": "640x400", "location": f"{lat},{lng}",
+                params={"size": "640x640", "location": f"{lat},{lng}",
                         "heading": angle["heading"], "pitch": angle["pitch"],
-                        "fov": 90, "source": "outdoor", "key": google_key},
+                        "fov": angle["fov"], "source": "outdoor", "key": google_key},
                 timeout=15,
             )
             if r.status_code == 200 and len(r.content) > 8000:
@@ -301,7 +309,7 @@ Respond ONLY in this JSON format:
   "pothole_found": true/false,
   "pothole_confirmed": true/false,
   "best_heading": 0,
-  "best_label": "North/Northeast/East/Southeast/South/Southwest/West/Northwest/Down",
+  "best_label": "one of the exact image labels shown above (e.g. 'North (close)' or 'Down')",
   "severity": "none/minor/moderate/severe/critical",
   "description": "Detailed 2-3 sentence description: where in frame, road surface condition, type of damage.",
   "estimated_diameter_m": 0.0,

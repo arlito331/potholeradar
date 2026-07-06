@@ -449,6 +449,8 @@ def main():
     print(f"🗺️  Grid: {len(points)} points to check")
 
     findings = []
+    debug_points = []  # one record per scanned point regardless of outcome, so a
+                        # "0 found" run can actually be inspected instead of guessed at
     errors = []
     points_scanned = 0
     points_skipped = 0
@@ -472,6 +474,16 @@ def main():
             low_confidence = confirmed and result.get("confidence_visual", 0) < MIN_CONFIDENCE
             if low_confidence:
                 confirmed = False
+
+            debug_img = next((im["b64"] for im in images if im["label"] == "Down"), images[0]["b64"])
+            debug_points.append({
+                "lat": lat, "lng": lng,
+                "pothole_confirmed": confirmed,
+                "confidence_visual": result.get("confidence_visual", 0),
+                "description": result.get("description", ""),
+                "maps_link": f"https://maps.google.com/?q={lat},{lng}",
+                "debug_image_b64": debug_img,
+            })
 
             if confirmed:
                 print(f"🕳️  POTHOLE — {result.get('severity','?')}, Ø{result.get('estimated_diameter_m',0)}m")
@@ -514,6 +526,7 @@ def main():
         "points_skipped_no_coverage": points_skipped,
         "potholes_found": len(findings),
         "findings": findings,
+        "debug_points": debug_points,
         "errors": errors,
     }
 

@@ -246,14 +246,27 @@ NOT a pothole — do NOT confirm these:
 ❌ Surface cracks (even large ones) without missing asphalt
 ❌ Rough or worn road texture
 ❌ Patch repairs (darker square/rectangle repairs)
-❌ Wet road surface
+❌ Wet road surface with no visible hole beneath
 ❌ Road markings or paint
 ❌ Normal concrete expansion joints
 ❌ General road deterioration without visible holes
 
-pothole_confirmed = true ONLY if you clearly see a HOLE with missing asphalt
-and exposed base material. Be strict — false positives waste PowerFix
-deployment resources.
+This is a systematic sweep, not a spot-check — the goal is to find every
+real pothole in these images, not just the most obvious one. Look
+carefully at all {len(images)} angles, including partial views near the
+frame edges and smaller/shallower holes, not only large dramatic ones.
+A pothole confirmed at 0.2m across with a shallow 3cm depth is just as
+valid a finding as a large severe one — use the severity field to convey
+how bad it is, don't let severity affect whether you confirm it at all.
+Water pooling inside a depression with visible broken edges is itself
+strong evidence of a real pothole underneath, even if the base material
+isn't fully visible through the water.
+
+pothole_confirmed = true if you see genuine evidence of a hole with
+missing asphalt per the criteria above — don't require every criterion
+to be perfectly visible, real potholes are often partially obscured by
+shadow, water, or camera angle. Only reject things that clearly match
+the "NOT a pothole" list above.
 
 Respond ONLY in this JSON format:
 {{

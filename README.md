@@ -50,10 +50,14 @@ These are separate from PotholeWatch's secrets — set them up fresh on this rep
 
 Each scanned point costs up to 5 Street View Static image fetches + 1 Claude Vision call (5 images). The free metadata pre-check filters out points with no coverage before any billed image fetch happens. Start with a small `radius_km` and `max_points` (e.g. 1km / 50 points) to gauge cost before running a full city sweep.
 
+## Detection tuning notes
+
+Early real scans under-found relative to known ground truth, for two compounding reasons: (1) a blind lat/lng grid wastes a lot of its point budget on locations with no Street View coverage at all (water, buildings, private property) — e.g. only 9/20 points had coverage in one early test — so raise `max_points` generously until road-network snapping (below) exists; (2) the Vision prompt was inherited from PotholeWatch's "confirm one specific reported incident" use case, where erring conservative makes sense, but for a blind proactive sweep that same strictness caused real, partially-obscured potholes to go unconfirmed. The prompt in `identify_pothole_in_images` was rebalanced to still reject clear non-potholes (cracks, wear, patches) but confirm genuine holes even when small, shallow, or partially obscured by water/shadow, rather than only obvious severe cases.
+
 ## Roadmap (not built yet)
 
 - Polygon/street drawing on the map instead of a circle (a District/Corregimiento/Barrio administrative-boundary approach was prototyped and shelved in favor of the simpler, universal map+search+radius picker — the real-boundary accuracy is still worth revisiting later)
-- OpenStreetMap/Overpass road-network snapping — sample grid points along actual streets instead of a raw lat/lng mesh (biggest accuracy/cost improvement available)
+- OpenStreetMap/Overpass road-network snapping — sample grid points along actual streets instead of a raw lat/lng mesh (the real fix for wasted no-coverage points, biggest accuracy/cost improvement available)
 - Waze/Google Places hazard corroboration as a cross-check on already-confirmed findings
 - Historical scan comparison/diffing (new pothole vs. previously seen at the same location)
 - Scheduled/cron scans (currently manual-trigger only)

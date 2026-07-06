@@ -377,7 +377,7 @@ async function runScan(){
 
 // ═══════════════════════════ COVERAGE MAP ═══════════════════════════
 
-let coverageMap = null, detailMap = null, manifestScans = [], currentDetailScan = null;
+let coverageMap = null, detailMap = null, manifestScans = [], currentDetailScan = null, detailMarkers = {};
 
 async function loadCoverage(){
   document.getElementById('detailSection').style.display = 'none';
@@ -570,12 +570,14 @@ async function viewScanDetail(scanId){
     const poly = L.polygon(scan.boundary, {color:'#3F7FE0', weight:2, fillOpacity:0.08}).addTo(detailMap);
     detailMap.fitBounds(poly.getBounds(), {padding:[20,20]});
   } else if (scan.radius_km){
-    L.circle([scan.center_lat, scan.center_lng], {radius: scan.radius_km*1000, color:'#3F7FE0', weight:1.5, fillOpacity:0.05}).addTo(detailMap);
+    const circle = L.circle([scan.center_lat, scan.center_lng], {radius: scan.radius_km*1000, color:'#3F7FE0', weight:1.5, fillOpacity:0.05}).addTo(detailMap);
+    detailMap.fitBounds(circle.getBounds(), {padding:[20,20]});
   }
 
-  (scan.findings||[]).forEach(f=>{
+  detailMarkers = {};
+  (scan.findings||[]).forEach((f, i)=>{
     const color = SEVERITY_COLOR[f.severity]||'#888';
-    L.marker([f.lat, f.lng], {
+    detailMarkers[i] = L.marker([f.lat, f.lng], {
       icon: L.divIcon({html:`<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 36 36"><circle cx="18" cy="18" r="8" fill="${color}"/></svg>`, className:'', iconSize:[28,28], iconAnchor:[14,14]})
     }).addTo(detailMap).bindPopup(`<div style="font-size:10px;color:${color};font-weight:700;text-transform:uppercase;margin-bottom:4px;">${f.severity}</div><div style="font-size:12px;">${f.description||''}</div>`);
   });
@@ -585,14 +587,16 @@ async function viewScanDetail(scanId){
     fEl.innerHTML = '<div class="empty-state">No potholes confirmed in this scan.</div>';
     return;
   }
-  fEl.innerHTML = scan.findings.map(f=>`
-    <div class="finding-card ${f.severity}">
+  fEl.innerHTML = scan.findings.map((f,i)=>`
+    <div class="finding-card ${f.severity}" onclick="detailMarkers[${i}] && detailMap.setView([${f.lat},${f.lng}],18); detailMarkers[${i}] && detailMarkers[${i}].openPopup();" style="cursor:pointer;">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
         <span style="font-size:10px;font-weight:700;letter-spacing:1px;color:${SEVERITY_COLOR[f.severity]};text-transform:uppercase;">${f.severity}</span>
         <span style="font-size:10px;color:var(--dim);">${f.confidence_visual||0}% confidence</span>
       </div>
+      ${f.street_view_image_b64 ? `<img src="data:image/jpeg;base64,${f.street_view_image_b64}" style="width:100%;max-width:280px;border-radius:6px;margin-bottom:8px;display:block;"/>` : ''}
       <div style="font-size:13px;margin-bottom:6px;">${f.description||''}</div>
-      <div style="font-size:11px;color:var(--muted);">Ø${f.estimated_diameter_m||0}m · ${f.estimated_depth_cm||0}cm deep · risk: ${f.accident_risk||'?'}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Ø${f.estimated_diameter_m||0}m · ${f.estimated_depth_cm||0}cm deep · risk: ${f.accident_risk||'?'} · ${f.lat?.toFixed(5)}, ${f.lng?.toFixed(5)}</div>
+      <a href="${f.maps_link||''}" target="_blank" onclick="event.stopPropagation();" style="font-size:10px;color:${SEVERITY_COLOR[f.severity]};">📍 Open in Google Maps →</a>
     </div>`).join('');
 }
 window.viewScanDetail = viewScanDetail;

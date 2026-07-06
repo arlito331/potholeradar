@@ -246,7 +246,10 @@ NOT a pothole — do NOT confirm these:
 ❌ Surface cracks (even large ones) without missing asphalt
 ❌ Rough or worn road texture
 ❌ Patch repairs (darker square/rectangle repairs)
-❌ Wet road surface with no visible hole beneath
+❌ Standing water or a puddle where you CANNOT see a hole or missing
+   asphalt beneath it — water pools on flat, sloped, or unevenly worn
+   pavement all the time without an actual hole underneath. Water alone,
+   without visible depth/edges/missing material, is NOT enough.
 ❌ Road markings or paint
 ❌ Normal concrete expansion joints
 ❌ General road deterioration without visible holes
@@ -258,15 +261,17 @@ frame edges and smaller/shallower holes, not only large dramatic ones.
 A pothole confirmed at 0.2m across with a shallow 3cm depth is just as
 valid a finding as a large severe one — use the severity field to convey
 how bad it is, don't let severity affect whether you confirm it at all.
-Water pooling inside a depression with visible broken edges is itself
-strong evidence of a real pothole underneath, even if the base material
-isn't fully visible through the water.
+If water is pooling, you must still be able to see a genuine hole
+(depth, broken edges, or exposed base material breaking the water's
+surface) to confirm it — inferring a hole merely because water is
+sitting somewhere is exactly the kind of guess this task must avoid.
 
-pothole_confirmed = true if you see genuine evidence of a hole with
-missing asphalt per the criteria above — don't require every criterion
-to be perfectly visible, real potholes are often partially obscured by
-shadow, water, or camera angle. Only reject things that clearly match
-the "NOT a pothole" list above.
+pothole_confirmed = true only if you can actually SEE a hole with
+missing asphalt — not infer one from indirect evidence like pooling,
+shadows, or discoloration alone. You don't need every listed criterion
+(jagged edges, exact color, exact size) to be textbook-perfect, but the
+core fact — there is a real hole, not just surface wear or water —
+must be something you can directly point to in the image, not guess at.
 
 Respond ONLY in this JSON format:
 {{

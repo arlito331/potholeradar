@@ -48,7 +48,7 @@ These are separate from PotholeWatch's secrets — set them up fresh on this rep
 
 ## Cost notes
 
-Each scanned point costs up to 5 Street View Static image fetches + 1 Claude Vision call (5 images). The free metadata pre-check filters out points with no coverage before any billed image fetch happens. Start with a small `radius_km` and `max_points` (e.g. 1km / 50 points) to gauge cost before running a full city sweep.
+Each scanned point costs up to 5 Street View Static image fetches + 1 Claude Vision call (5 images). The free metadata pre-check filters out points with no coverage before any billed image fetch happens. The app's `max_points` dropdown is capped at 20 for this test round (1/5/10/15/20) — the workflow itself still accepts any value up to the hard ceiling of 500 if triggered directly from GitHub Actions.
 
 ## Detection tuning notes
 

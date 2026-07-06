@@ -18,10 +18,10 @@ on:
         type: string
         default: '2'
       max_points:
-        description: 'Safety cap on grid points scanned (hard ceiling 500)'
+        description: 'Safety cap on grid points scanned (app UI currently offers 1/5/10/15/20; hard ceiling 500)'
         required: true
         type: string
-        default: '150'
+        default: '20'
       lat:
         description: 'Center latitude, if already resolved via map search (leave blank to geocode city+country instead)'
         required: false

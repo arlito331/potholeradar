@@ -62,6 +62,10 @@ DEFAULT_SPACING_M  = 130
 DEFAULT_MAX_POINTS = 150
 HARD_MAX_POINTS    = 500
 MAX_FINDINGS       = 20  # test-round cap: stop scanning once this many potholes are confirmed
+MIN_CONFIDENCE     = 70  # code-level floor: several real false positives clustered at 62-65%
+                          # confidence_visual (inferring from water/drainage/patches rather than
+                          # directly seeing a hole) — don't rely solely on the model's own
+                          # pothole_confirmed flag, also require it to say it's reasonably sure
 
 SCAN_DIR    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scans")
 HISTORY_DIR = os.path.join(SCAN_DIR, "history")
@@ -253,6 +257,15 @@ NOT a pothole — do NOT confirm these:
 ❌ Road markings or paint
 ❌ Normal concrete expansion joints
 ❌ General road deterioration without visible holes
+❌ Depressions, grates, or dark patches immediately next to a drainage
+   opening/gutter/storm drain — these are usually intentional drainage
+   features (built to be lower, to channel water), not damage. Be extra
+   skeptical near drainage infrastructure specifically.
+❌ A patch repair area where you're inferring a "separate" hole next to
+   or within it — patches are often uneven or discolored at their own
+   edges, which is easy to misread as an adjacent distinct pothole. If a
+   patch is present, only confirm a pothole if it is clearly and fully
+   separate from the patch, not touching or bordering it.
 
 This is a systematic sweep, not a spot-check — the goal is to find every
 real pothole in these images, not just the most obvious one. Look
@@ -428,6 +441,9 @@ def main():
 
             best_b64, result, confirmed = identify_pothole_in_images(images, lat, lng)
             points_scanned += 1
+            low_confidence = confirmed and result.get("confidence_visual", 0) < MIN_CONFIDENCE
+            if low_confidence:
+                confirmed = False
 
             if confirmed:
                 print(f"🕳️  POTHOLE — {result.get('severity','?')}, Ø{result.get('estimated_diameter_m',0)}m")
@@ -449,6 +465,8 @@ def main():
                 if len(findings) >= MAX_FINDINGS:
                     print(f"\n🛑 Reached the {MAX_FINDINGS}-finding test cap — stopping the scan early.")
                     break
+            elif low_confidence:
+                print(f"clear (model flagged it but only {result.get('confidence_visual',0)}% confident — below the {MIN_CONFIDENCE}% floor)")
             else:
                 print("clear")
         except Exception as e:

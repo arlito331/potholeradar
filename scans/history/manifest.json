@@ -64,5 +64,16 @@
     "scan_time": "2026-07-06T02:37:23Z",
     "points_scanned": 0,
     "potholes_found": 0
+  },
+  {
+    "scan_id": "PR-20260706-034842",
+    "country": "Panama",
+    "city": "Exact coordinates (8.401417, -80.270611)",
+    "center_lat": 8.401417,
+    "center_lng": -80.270611,
+    "radius_km": 0.4,
+    "scan_time": "2026-07-06T03:48:42Z",
+    "points_scanned": 6,
+    "potholes_found": 2
   }
 ]

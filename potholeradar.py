@@ -178,12 +178,21 @@ def streetview_has_coverage(lat, lng, google_key):
 
 
 def fetch_street_view_angles(lat, lng, google_key):
-    """Fetch Street View imagery from 4 compass headings + one downward tilt."""
+    """
+    Fetch Street View imagery from 8 compass headings + one downward tilt.
+    8 rather than 4 because the road at a given point can run in any
+    direction — 4 cardinal headings alone can easily miss the direction
+    the road actually faces, showing mostly off-road scenery instead.
+    """
     angles = [
         {"heading": 0,   "pitch": -20, "label": "North"},
+        {"heading": 45,  "pitch": -20, "label": "Northeast"},
         {"heading": 90,  "pitch": -20, "label": "East"},
+        {"heading": 135, "pitch": -20, "label": "Southeast"},
         {"heading": 180, "pitch": -20, "label": "South"},
+        {"heading": 225, "pitch": -20, "label": "Southwest"},
         {"heading": 270, "pitch": -20, "label": "West"},
+        {"heading": 315, "pitch": -20, "label": "Northwest"},
         {"heading": 0,   "pitch": -60, "label": "Down"},
     ]
     images = []
@@ -292,7 +301,7 @@ Respond ONLY in this JSON format:
   "pothole_found": true/false,
   "pothole_confirmed": true/false,
   "best_heading": 0,
-  "best_label": "North/South/East/West/Down",
+  "best_label": "North/Northeast/East/Southeast/South/Southwest/West/Northwest/Down",
   "severity": "none/minor/moderate/severe/critical",
   "description": "Detailed 2-3 sentence description: where in frame, road surface condition, type of damage.",
   "estimated_diameter_m": 0.0,

@@ -128,7 +128,7 @@ a{color:inherit;}
         <input type="text" id="fSearch" placeholder="e.g. McDonald's Via España, or El Cangrejo" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlace();}"/>
         <button class="btn secondary" style="white-space:nowrap;" onclick="searchPlace()">Search</button>
       </div>
-      <div class="hint" id="searchHint">Or just click anywhere on the map to drop the pin there.</div>
+      <div class="hint" id="searchHint">Or paste exact coordinates (8.401417, -80.270611), or click the map to drop the pin there.</div>
     </div>
 
     <div id="scan-map" style="margin:10px 0;"></div>
@@ -147,7 +147,7 @@ a{color:inherit;}
         <option value="20" selected>20</option>
       </select>
     </div>
-    <div class="hint">Each point costs up to 5 Street View fetches + 1 Claude Vision call. Capped at 20 points per scan for this test round.</div>
+    <div class="hint">Each point costs up to 9 Street View fetches + 1 Claude Vision call. Capped at 20 points per scan for this test round.</div>
     <button class="btn" id="runBtn" style="margin-top:16px;width:100%;padding:12px;font-size:12px;" onclick="runScan()">🔵 Run Scan →</button>
 
     <div class="status-panel" id="statusPanel">
@@ -239,7 +239,7 @@ function updateSearchHint(){
   const hint = document.getElementById('searchHint');
   hint.textContent = lastSearchLabel
     ? `Centered on: ${lastSearchLabel}`
-    : 'Or just click anywhere on the map to drop the pin there.';
+    : 'Or paste exact coordinates (8.401417, -80.270611), or click the map to drop the pin there.';
 }
 
 function onRadiusInput(){
@@ -248,11 +248,44 @@ function onRadiusInput(){
   if (scanCircle) scanCircle.setRadius(km * 1000);
 }
 
+function parseCoordString(query){
+  // Decimal: "8.401417, -80.270611"
+  let m = query.match(/^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/);
+  if (m) return [parseFloat(m[1]), parseFloat(m[2])];
+
+  // DMS: 8°24'05.1"N 80°16'14.2"W (as copied from Google Maps)
+  const dms = /(\d+)[°\s]+(\d+)['\s]+([\d.]+)["\s]*([NSEW])/gi;
+  const parts = [...query.matchAll(dms)];
+  if (parts.length === 2){
+    const toDecimal = (deg,min,sec,dir) => {
+      const val = parseFloat(deg) + parseFloat(min)/60 + parseFloat(sec)/3600;
+      return (dir === 'S' || dir === 'W') ? -val : val;
+    };
+    const a = toDecimal(parts[0][1],parts[0][2],parts[0][3],parts[0][4].toUpperCase());
+    const b = toDecimal(parts[1][1],parts[1][2],parts[1][3],parts[1][4].toUpperCase());
+    // Whichever one has N/S is latitude
+    return parts[0][4].toUpperCase() === 'N' || parts[0][4].toUpperCase() === 'S' ? [a,b] : [b,a];
+  }
+  return null;
+}
+
 async function searchPlace(){
   const query = document.getElementById('fSearch').value.trim();
   if (!query) return;
   const country = document.getElementById('fCountry').value;
   const hint = document.getElementById('searchHint');
+
+  const coords = parseCoordString(query);
+  if (coords){
+    const [lat, lng] = coords;
+    scanMap.setView([lat,lng], 17);
+    scanMarker.setLatLng([lat,lng]);
+    scanCircle.setLatLng([lat,lng]);
+    lastSearchLabel = `Exact coordinates (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
+    updateSearchHint();
+    return;
+  }
+
   hint.textContent = 'Searching…';
   try {
     const res = await fetch(

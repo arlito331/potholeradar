@@ -10,8 +10,8 @@ Part of the PowerFix tool family: [PotholeWatch](https://github.com/arlito331/po
 2. Generate a grid of scan points covering the chosen radius, spaced ~130m apart, capped at `max_points` (default 150, hard ceiling 500).
 3. For each point: check Street View **metadata** first (free) to skip points with no panorama coverage, then fetch 5 Street View images (N/E/S/W headings + downward tilt).
 4. Send all 5 images to Claude Vision with a strict "true pothole vs. damaged road" prompt — only confirmed potholes (a real hole with exposed base material, not cracks/patches/wear) are recorded. Capped at 20 confirmed findings per scan for now (test-round limit — the scan stops early once it hits this, see `MAX_FINDINGS` in `potholeradar.py`).
-5. Write `scans/latest_scan.json` + an archived copy and a manifest entry in `scans/history/`, and email an HTML digest of findings if any were confirmed.
-6. `index.html` (GitHub Pages) is the app: a **New Scan** tab (map + place search + adjustable radius slider) that triggers a scan directly from the browser, and a **Coverage Map** tab showing every scanned area across Latin America, with drill-down into each scan's individual findings.
+5. Write `scans/latest_scan.json` + an archived copy and a manifest entry in `scans/history/`, and try to email an HTML digest of findings if any were confirmed (a failure here — e.g. a bad Gmail OAuth secret — is logged but never blocks the scan results from being saved/committed).
+6. `index.html` (GitHub Pages) is the app: a **New Scan** tab (map + place search + adjustable radius slider) that triggers a scan directly from the browser, and a **Coverage Map** tab showing every scanned area across Latin America, with drill-down into each scan's individual findings. Both the "scan complete" state and the detail drill-down offer a **Download PDF Report** button — a client-side jsPDF report (no backend involved) listing every confirmed finding with its Street View image, severity, size, and coordinates.
 
 ## Running a scan
 

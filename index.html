@@ -160,7 +160,10 @@ a{color:inherit;}
   </div>
 
   <div id="detailSection" style="display:none;">
-    <button class="btn secondary" style="margin-bottom:14px;" onclick="backToOverview()">← Back to overview</button>
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <button class="btn secondary" onclick="backToOverview()">← Back to overview</button>
+      <button class="btn" onclick="downloadScanPDF(currentDetailScan)">📄 Download PDF Report</button>
+    </div>
     <div class="card" style="padding:0;overflow:hidden;">
       <div id="detail-map"></div>
     </div>
@@ -170,6 +173,7 @@ a{color:inherit;}
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 const REPO_OWNER = 'arlito331';
 const REPO_NAME  = 'potholeradar';
@@ -354,7 +358,14 @@ async function runScan(){
     }
 
     if (run.conclusion === 'success'){
-      setStatus('success', '✅ Scan complete', `<a href="${run.html_url}" target="_blank">View log</a> · <a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a>`);
+      setStatus('success', '✅ Scan complete', `<a href="${run.html_url}" target="_blank">View log</a> · <a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
+      fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/scans/latest_scan.json?t=${Date.now()}`)
+        .then(r => r.json())
+        .then(scan => {
+          const link = document.getElementById('pdfLink');
+          if (link) link.onclick = (e) => { e.preventDefault(); downloadScanPDF(scan); };
+        })
+        .catch(()=>{});
     } else {
       setStatus('error', `❌ Scan ${run.conclusion}`, `<a href="${run.html_url}" target="_blank">View log for details →</a>`);
     }
@@ -366,7 +377,7 @@ async function runScan(){
 
 // ═══════════════════════════ COVERAGE MAP ═══════════════════════════
 
-let coverageMap = null, detailMap = null, manifestScans = [];
+let coverageMap = null, detailMap = null, manifestScans = [], currentDetailScan = null;
 
 async function loadCoverage(){
   document.getElementById('detailSection').style.display = 'none';
@@ -387,6 +398,111 @@ async function loadCoverage(){
 function scanAreaLabel(s){
   return s.barrio || s.corregimiento || s.district || s.city || '';
 }
+
+// ═══════════════════════════ PDF REPORT ═══════════════════════════
+
+function downloadScanPDF(scan){
+  const { jsPDF } = window.jspdf;
+  const W = 612, H = 792, M = 40; // US Letter, portrait
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: [W, H] });
+
+  const BG='#0D0D0D', PANEL='#1A1A1A', BORDER='#333333', TEXT='#FFFFFF', MUTED='#999999', DIM='#666666', ACCENT='#3F7FE0';
+  const SEV_COLOR = {critical:'#FF3B3B', severe:'#FF3B3B', moderate:'#3F7FE0', minor:'#F0A030', none:'#888888'};
+  const hexToRgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+  const set = (fn, hex) => doc[fn](...hexToRgb(hex));
+
+  let y = 0;
+  function bg(){ set('setFillColor', BG); doc.rect(0, 0, W, H, 'F'); y = M; }
+  function ensureRoom(need){ if (y + need > H - M) { doc.addPage(); bg(); } }
+  function text(s, x, size, color, style='normal'){
+    doc.setFont('helvetica', style); doc.setFontSize(size); set('setTextColor', color);
+    doc.text(String(s), x, y);
+  }
+  function wrapped(s, x, size, color, maxWidth, lh=size*1.25){
+    doc.setFont('helvetica','normal'); doc.setFontSize(size); set('setTextColor', color);
+    const lines = doc.splitTextToSize(String(s), maxWidth);
+    lines.forEach((line,i)=> doc.text(line, x, y + i*lh));
+    y += lines.length*lh;
+  }
+
+  bg();
+  text('POTHOLERADAR', M, 10, ACCENT, 'bold'); y += 20;
+  text('Scan Report', M, 22, TEXT, 'bold'); y += 22;
+  text(`${scanAreaLabel(scan)}, ${scan.country}`, M, 12, MUTED); y += 16;
+  text(`Scanned ${new Date(scan.scan_time).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})} · ~${scan.radius_km}km radius`, M, 10, DIM); y += 24;
+
+  set('setDrawColor', BORDER); doc.setLineWidth(1); doc.line(M, y, W-M, y); y += 20;
+
+  // Stats row
+  const stats = [
+    ['POTHOLES FOUND', String(scan.potholes_found)],
+    ['POINTS SCANNED', `${scan.points_scanned}/${scan.points_total}`],
+    ['NO COVERAGE', String(scan.points_skipped_no_coverage)],
+  ];
+  const colW = (W - 2*M) / 3;
+  stats.forEach(([label, val], i) => {
+    const x = M + i*colW;
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); set('setTextColor', DIM);
+    doc.text(label, x, y);
+    doc.setFont('helvetica','bold'); doc.setFontSize(20); set('setTextColor', TEXT);
+    doc.text(val, x, y + 22);
+  });
+  y += 50;
+  set('setDrawColor', BORDER); doc.line(M, y, W-M, y); y += 24;
+
+  if (!scan.findings || !scan.findings.length){
+    text('No potholes confirmed in this scan.', M, 12, MUTED); y += 20;
+  }
+
+  (scan.findings || []).forEach((f, i) => {
+    const color = SEV_COLOR[f.severity] || ACCENT;
+    const hasImg = !!f.street_view_image_b64;
+    const imgH = hasImg ? 160 : 0;
+    ensureRoom(70 + imgH);
+
+    const cardTop = y;
+    set('setFillColor', PANEL); doc.roundedRect(M, cardTop, W-2*M, 0, 0, 0, 'F'); // placeholder, real box drawn after height known
+
+    y += 4;
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); set('setTextColor', color);
+    doc.text(`#${i+1} · ${(f.severity||'?').toUpperCase()}`, M+12, y+10);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); set('setTextColor', DIM);
+    doc.text(`${f.confidence_visual||0}% confidence`, W-M-12, y+10, {align:'right'});
+    y += 20;
+
+    if (hasImg){
+      try { doc.addImage(`data:image/jpeg;base64,${f.street_view_image_b64}`, 'JPEG', M+12, y, 160, 140); } catch(e){}
+      const textX = M + 12 + 160 + 14;
+      const textW = W - M - 12 - textX;
+      const savedY = y;
+      wrapped(f.description || '', textX, 10, TEXT, textW);
+      y += 8;
+      text(`Ø${f.estimated_diameter_m||0}m · ${f.estimated_depth_cm||0}cm deep`, textX, 9, MUTED); y += 14;
+      text(`Location: ${f.location_in_frame||'?'} · Accident risk: ${f.accident_risk||'?'}`, textX, 9, MUTED); y += 14;
+      text(`${f.lat?.toFixed(5)}, ${f.lng?.toFixed(5)}`, textX, 9, DIM);
+      y = Math.max(y, savedY + 140) + 16;
+    } else {
+      wrapped(f.description || '', M+12, 10, TEXT, W-2*M-24);
+      y += 8;
+      text(`Ø${f.estimated_diameter_m||0}m · ${f.estimated_depth_cm||0}cm deep · Location: ${f.location_in_frame||'?'} · Accident risk: ${f.accident_risk||'?'}`, M+12, 9, MUTED);
+      y += 14;
+      text(`${f.lat?.toFixed(5)}, ${f.lng?.toFixed(5)}`, M+12, 9, DIM);
+      y += 24;
+    }
+
+    set('setDrawColor', color); doc.setLineWidth(2); doc.line(M, cardTop, M, y-8);
+    set('setDrawColor', BORDER); doc.setLineWidth(0.5); doc.line(M, y-4, W-M, y-4);
+    y += 12;
+  });
+
+  ensureRoom(30);
+  set('setDrawColor', BORDER); doc.line(M, y, W-M, y); y += 16;
+  text('POWERFIX · REPAIR. REINVENTED.', M, 8, ACCENT, 'bold');
+  text('PotholeRadar v1.2 — proactive area sweep, no prior report required.', M, 8, DIM); y += 12;
+
+  doc.save(`PotholeRadar_${scan.scan_id}.pdf`);
+}
+window.downloadScanPDF = downloadScanPDF;
 
 function renderCoverageMap(){
   const el = document.getElementById('coverage-map');
@@ -439,6 +555,7 @@ async function viewScanDetail(scanId){
   try {
     const res = await fetch(HISTORY_URL(scanId) + '?t=' + Date.now());
     scan = await res.json();
+    currentDetailScan = scan;
   } catch (e){
     document.getElementById('detailFindings').innerHTML = '<div class="empty-state">Could not load this scan.</div>';
     return;

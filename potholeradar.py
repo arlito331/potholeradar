@@ -225,30 +225,38 @@ def streetview_has_coverage(lat, lng, google_key):
 
 def fetch_street_view_angles(lat, lng, google_key):
     """
-    Fetch ONLY close-in pavement shots — no wide establishing shots.
+    Fetch close-in pavement shots, calibrated to avoid two proven failure
+    modes on opposite ends of the same dial:
 
-    A real failure case proved wide 90 FOV shots are unreliable for this:
-    the model "confirmed" a pothole based on a wide shot where the claimed
-    damage was a barely-resolvable dark smudge far in the distance near a
-    gas station entrance — impossible to actually verify at that size, and
-    almost certainly not real. A human inspecting Street View pans/zooms in
-    close on the pavement itself; a wide shot is the equivalent of judging
-    a road from a car window at highway speed. So every shot here is now
-    narrow-FOV and steeply pitched down at the road surface, all 8
-    directions plus one very steep straight-down view — orientation
-    context is a secondary concern next to actually being able to see
-    what's being judged.
+    1. Wide 90 FOV shots let the model "confirm" potholes from a
+       barely-resolvable dark smudge far in the distance (a real false
+       positive traced to a gas-station-entrance shot).
+    2. Overcorrecting to pitch -50/-85 with a 40 FOV swung too far the
+       other way: Street View panoramas are stitched from oblique
+       captures, and the area close to/beneath the capture rig is a
+       known "nadir" artifact zone — there's no real camera data there,
+       so the stitching software smears it into a flat, textureless
+       gray-brown blur. Two independent scan points produced that exact
+       blur (visually confirmed by decoding the stored debug images),
+       and the model consistently misread it as "murky water" or a
+       "camera malfunction" — a real street came back with zero
+       findings because every image at each point was unusable noise,
+       not because the pavement was actually clear.
+
+    These angles sit in the middle: pitched down enough to frame
+    pavement close-up rather than a wide establishing shot, but shallow
+    enough to stay out of the corrupted near-nadir zone.
     """
     angles = [
-        {"heading": 0,   "pitch": -50, "fov": 40, "label": "North (close)"},
-        {"heading": 45,  "pitch": -50, "fov": 40, "label": "Northeast (close)"},
-        {"heading": 90,  "pitch": -50, "fov": 40, "label": "East (close)"},
-        {"heading": 135, "pitch": -50, "fov": 40, "label": "Southeast (close)"},
-        {"heading": 180, "pitch": -50, "fov": 40, "label": "South (close)"},
-        {"heading": 225, "pitch": -50, "fov": 40, "label": "Southwest (close)"},
-        {"heading": 270, "pitch": -50, "fov": 40, "label": "West (close)"},
-        {"heading": 315, "pitch": -50, "fov": 40, "label": "Northwest (close)"},
-        {"heading": 0,   "pitch": -85, "fov": 50, "label": "Down"},
+        {"heading": 0,   "pitch": -25, "fov": 55, "label": "North (close)"},
+        {"heading": 45,  "pitch": -25, "fov": 55, "label": "Northeast (close)"},
+        {"heading": 90,  "pitch": -25, "fov": 55, "label": "East (close)"},
+        {"heading": 135, "pitch": -25, "fov": 55, "label": "Southeast (close)"},
+        {"heading": 180, "pitch": -25, "fov": 55, "label": "South (close)"},
+        {"heading": 225, "pitch": -25, "fov": 55, "label": "Southwest (close)"},
+        {"heading": 270, "pitch": -25, "fov": 55, "label": "West (close)"},
+        {"heading": 315, "pitch": -25, "fov": 55, "label": "Northwest (close)"},
+        {"heading": 0,   "pitch": -40, "fov": 45, "label": "Down"},
     ]
     images = []
     for angle in angles:
@@ -330,6 +338,13 @@ NOT a pothole — do NOT confirm these:
    edges, which is easy to misread as an adjacent distinct pothole. If a
    patch is present, only confirm a pothole if it is clearly and fully
    separate from the patch, not touching or bordering it.
+❌ A flat, blurry, textureless gray/brown smear with no discernible
+   pavement texture, lane markings, or edges — this is a known Street
+   View stitching artifact from very steep/close camera angles, not
+   water, not a hole, not evidence of anything. If an image looks like
+   this, disregard that specific image entirely and base your judgment
+   on the other, clearer angles — don't guess at what an unreadable
+   image might be showing.
 
 This is a systematic sweep, not a spot-check — the goal is to find every
 real pothole in these images, not just the most obvious one. Look

@@ -64,6 +64,9 @@ a{color:inherit;}
   animation:spin 1.8s linear infinite;}
 .scan-dot{position:absolute;top:50%;left:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#3F7FE0;box-shadow:0 0 10px #3F7FE0;animation:pulse 1.2s infinite;}
 
+@keyframes blip{0%,88%{opacity:0;transform:scale(0.6);}91%,96%{opacity:1;transform:scale(1);}100%{opacity:0;transform:scale(0.6);}}
+.radar-blip{position:absolute;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);opacity:0;animation:blip 3.6s infinite;}
+
 #coverage-map,#detail-map,#scan-map{width:100%;height:280px;border-radius:8px;overflow:hidden;}
 .leaflet-container{background:#0a1420;}
 .leaflet-control-attribution{display:none;}
@@ -96,7 +99,12 @@ a{color:inherit;}
 <body>
 
 <div class="header">
-  <div class="radar-wrap spin-slow" id="header-radar"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="none" stroke="#3F7FE0" stroke-opacity=".3" stroke-width="1"/><circle cx="22" cy="22" r="12" fill="none" stroke="#3F7FE0" stroke-opacity=".2" stroke-width="1"/><line x1="22" y1="3" x2="22" y2="22" stroke="#3F7FE0" stroke-opacity=".5" stroke-width="1.5"/><circle cx="22" cy="22" r="2" fill="#3F7FE0"/></svg></div>
+  <div class="radar-wrap spin-slow" id="header-radar">
+    <svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" fill="none" stroke="#3F7FE0" stroke-opacity=".3" stroke-width="1"/><circle cx="22" cy="22" r="12" fill="none" stroke="#3F7FE0" stroke-opacity=".2" stroke-width="1"/><line x1="22" y1="3" x2="22" y2="22" stroke="#3F7FE0" stroke-opacity=".5" stroke-width="1.5"/><circle cx="22" cy="22" r="2" fill="#3F7FE0"/></svg>
+    <div class="radar-blip" style="width:4px;height:4px;top:12px;left:28px;animation-delay:0s;"></div>
+    <div class="radar-blip" style="width:3px;height:3px;top:26px;left:14px;animation-delay:1.4s;"></div>
+    <div class="radar-blip" style="width:3px;height:3px;top:18px;left:8px;animation-delay:2.6s;"></div>
+  </div>
   <div class="header-text">
     <div class="header-eyebrow">POTHOLERADAR · v1.2</div>
     <div class="header-title">Area Scanner</div>
@@ -161,9 +169,13 @@ a{color:inherit;}
         <option value="10">10</option>
         <option value="15">15</option>
         <option value="20" selected>20</option>
+        <option value="30">30</option>
+        <option value="50">50</option>
+        <option value="75">75</option>
+        <option value="100">100</option>
       </select>
     </div>
-    <div class="hint">Each point costs up to 9 Street View fetches + 1 Claude Vision call. Capped at 20 points per scan for this test round.</div>
+    <div class="hint">Each point costs up to 9 Street View fetches + 1 Claude Vision call — more points means a slower, pricier scan. Findings are still capped at 20 confirmed potholes per scan.</div>
     <button class="btn" id="runBtn" style="margin-top:16px;width:100%;padding:12px;font-size:12px;" onclick="runScan()">🔵 Run Scan →</button>
 
     <div class="status-panel" id="statusPanel">
@@ -178,6 +190,9 @@ a{color:inherit;}
         </div>
         <div class="scan-sweep"></div>
         <div class="scan-dot"></div>
+        <div class="radar-blip" style="width:6px;height:6px;top:16px;left:46px;animation-delay:0.4s;"></div>
+        <div class="radar-blip" style="width:5px;height:5px;top:44px;left:14px;animation-delay:1.8s;"></div>
+        <div class="radar-blip" style="width:5px;height:5px;top:50px;left:52px;animation-delay:3s;"></div>
       </div>
       <div class="status-text">
         <div class="status-title" id="statusTitle">Dispatching…</div>
@@ -255,8 +270,11 @@ function initScanMap(){
 }
 
 // ═══════════════════════════ SCAN MODE (radius vs street) ═══════════════════════════
+// Street selection is two-step: click a road to select the whole thing (yellow),
+// then click two points along it to narrow the highlighted range to exactly the
+// stretch you mean — the sub-range (not the whole OSM way) is what gets scanned.
 
-let scanMode = 'radius', streetLayerGroup = null, selectedStreet = null;
+let scanMode = 'radius', streetLayerGroup = null, selectedStreet = null, trimPoints = [], trimOverlay = null;
 
 function setScanMode(mode){
   scanMode = mode;
@@ -294,24 +312,82 @@ async function loadStreetsInView(){
     (data.elements||[]).forEach(way=>{
       if (!way.geometry) return;
       const coords = way.geometry.map(g=>[g.lat, g.lon]);
-      const line = L.polyline(coords, {color:'#3F7FE0', weight:5, opacity:0.35});
+      const isSelected = selectedStreet && selectedStreet.id === way.id;
+      const line = L.polyline(coords, {
+        color: isSelected ? '#FFD400' : '#3F7FE0',
+        weight: isSelected ? 6 : 5,
+        opacity: isSelected ? 0.75 : 0.35,
+      });
       line.addTo(streetLayerGroup);
-      line.on('click', (e)=> { L.DomEvent.stopPropagation(e); selectStreet(way, coords, line); });
-      if (selectedStreet && selectedStreet.id === way.id) highlightLine(line);
+      line.on('click', (e)=> {
+        L.DomEvent.stopPropagation(e);
+        if (isSelected) { addTrimPoint(e.latlng); } else { selectStreet(way, coords); }
+      });
     });
+    redrawTrimOverlay();
   } catch (e){
     document.getElementById('streetSelection').textContent = 'Could not load streets — try panning/zooming again.';
   }
 }
 
-function highlightLine(line){ line.setStyle({color:'#FF3B3B', weight:6, opacity:0.9}); }
-
-function selectStreet(way, coords, line){
-  streetLayerGroup.eachLayer(l => l.setStyle({color:'#3F7FE0', weight:5, opacity:0.35}));
-  highlightLine(line);
-  selectedStreet = { id: way.id, name: (way.tags && way.tags.name) || 'Unnamed road', path: coords };
-  document.getElementById('streetSelection').innerHTML = `Selected: <strong>${selectedStreet.name}</strong> (${coords.length} pts)`;
+function selectStreet(way, coords){
+  selectedStreet = { id: way.id, name: (way.tags && way.tags.name) || 'Unnamed road', fullPath: coords, path: coords };
+  trimPoints = [];
+  loadStreetsInView();
+  updateStreetSelectionText();
 }
+
+function nearestPathIndex(path, latlng){
+  let best = 0, bestD = Infinity;
+  path.forEach((c, i) => { const d = (c[0]-latlng.lat)**2 + (c[1]-latlng.lng)**2; if (d < bestD) { bestD = d; best = i; } });
+  return best;
+}
+
+function addTrimPoint(latlng){
+  const idx = nearestPathIndex(selectedStreet.fullPath, latlng);
+  trimPoints.push(idx);
+  if (trimPoints.length > 2) trimPoints = [idx]; // a 3rd click starts a fresh range
+  if (trimPoints.length === 2){
+    const [a, b] = [...trimPoints].sort((x, y) => x - y);
+    selectedStreet.path = selectedStreet.fullPath.slice(a, b + 1);
+  }
+  redrawTrimOverlay();
+  updateStreetSelectionText();
+}
+
+function redrawTrimOverlay(){
+  if (trimOverlay) { streetLayerGroup.removeLayer(trimOverlay); trimOverlay = null; }
+  if (!selectedStreet) return;
+  trimOverlay = L.layerGroup().addTo(streetLayerGroup);
+  trimPoints.forEach(idx => {
+    L.circleMarker(selectedStreet.fullPath[idx], {radius:6, color:'#fff', fillColor:'#FFD400', fillOpacity:1, weight:2}).addTo(trimOverlay);
+  });
+  if (selectedStreet.path.length !== selectedStreet.fullPath.length){
+    L.polyline(selectedStreet.path, {color:'#FFD400', weight:9, opacity:1}).addTo(trimOverlay);
+  }
+}
+
+function updateStreetSelectionText(){
+  if (!selectedStreet){
+    document.getElementById('streetSelection').textContent = 'No street selected — zoom in until roads appear, then click one.';
+    return;
+  }
+  const trimmed = selectedStreet.path.length !== selectedStreet.fullPath.length;
+  const status = trimmed
+    ? `narrowed to ${selectedStreet.path.length} of ${selectedStreet.fullPath.length} pts`
+    : `${selectedStreet.fullPath.length} pts — click two points along the highlighted road to narrow the range`;
+  const resetLink = trimmed ? ` · <a href="#" onclick="resetStreetTrim();return false;">Use whole street</a>` : '';
+  document.getElementById('streetSelection').innerHTML = `Selected: <strong>${selectedStreet.name}</strong> (${status})${resetLink}`;
+}
+
+function resetStreetTrim(){
+  if (!selectedStreet) return;
+  trimPoints = [];
+  selectedStreet.path = selectedStreet.fullPath;
+  redrawTrimOverlay();
+  updateStreetSelectionText();
+}
+window.resetStreetTrim = resetStreetTrim;
 
 function updateSearchHint(){
   const hint = document.getElementById('searchHint');
@@ -502,8 +578,9 @@ async function runScan(){
       return;
     }
 
+    const RUN_STATUS_LABELS = { queued: 'Queued…', in_progress: 'Scanning…', waiting: 'Queued…' };
     while (run.status !== 'completed'){
-      setStatus('', `Scan ${run.status}…`, '');
+      setStatus('', RUN_STATUS_LABELS[run.status] || 'Scanning…', '');
       await sleep(5000);
       const r = await ghFetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${run.id}`);
       run = await r.json();

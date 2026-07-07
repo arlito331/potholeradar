@@ -228,5 +228,18 @@
     "scan_time": "2026-07-07T18:05:37Z",
     "points_scanned": 19,
     "potholes_found": 0
+  },
+  {
+    "scan_id": "PR-20260707-210601",
+    "mode": "radius",
+    "country": "Panama",
+    "city": "Custom point (8.9810, -79.5244)",
+    "center_lat": 8.980973997712683,
+    "center_lng": -79.52437520027162,
+    "radius_km": 0.1,
+    "path": null,
+    "scan_time": "2026-07-07T21:06:01Z",
+    "points_scanned": 49,
+    "potholes_found": 3
   }
 ]

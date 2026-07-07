@@ -291,7 +291,10 @@ function setScanMode(mode){
   if (mode === 'street'){
     scanMarker.setOpacity(0);
     scanCircle.setStyle({opacity:0, fillOpacity:0});
-    loadStreetsInView();
+    // Streets only load past zoom 15 — auto-zoom in instead of leaving the user
+    // to click around wondering why nothing responds at their current zoom.
+    if (scanMap.getZoom() < 16) scanMap.setView(scanMap.getCenter(), 16, {animate:false});
+    else loadStreetsInView();
   } else {
     scanMarker.setOpacity(1);
     scanCircle.setStyle({opacity:1, fillOpacity:0.12});
@@ -299,6 +302,7 @@ function setScanMode(mode){
   }
 }
 window.setScanMode = setScanMode;
+window.loadStreetsInView = loadStreetsInView;
 
 async function loadStreetsInView(){
   if (!scanMap) return;
@@ -307,9 +311,14 @@ async function loadStreetsInView(){
       ? `Selected: ${selectedStreet.name} (${selectedStreet.path.length} pts)` : 'Zoom in further to load streets…';
     return;
   }
+  document.getElementById('streetSelection').textContent = selectedStreet
+    ? `Selected: ${selectedStreet.name} (${selectedStreet.path.length} pts)` : 'Loading streets…';
   const b = scanMap.getBounds();
   const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
-  const query = `[out:json][timeout:25];way["highway"]["name"](${bbox});out geom;`;
+  // No ["name"] filter — plenty of real residential streets/alleys are unnamed in
+  // OSM and were previously invisible/unselectable entirely; they render as
+  // "Unnamed road" instead of being silently excluded.
+  const query = `[out:json][timeout:25];way["highway"](${bbox});out geom;`;
   try {
     const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: query });
     const data = await res.json();
@@ -328,8 +337,13 @@ async function loadStreetsInView(){
       }).addTo(streetLayerGroup);
     });
     redrawTrimOverlay();
+    if (!streetsInView.length){
+      document.getElementById('streetSelection').innerHTML = 'No roads found in this view. <a href="#" onclick="loadStreetsInView();return false;">Retry</a> or pan/zoom and try again.';
+    } else if (!selectedStreet){
+      updateStreetSelectionText();
+    }
   } catch (e){
-    document.getElementById('streetSelection').textContent = 'Could not load streets — try panning/zooming again.';
+    document.getElementById('streetSelection').innerHTML = 'Could not load streets (the map data server may be busy). <a href="#" onclick="loadStreetsInView();return false;">Retry</a>';
   }
 }
 
@@ -558,6 +572,21 @@ function switchTab(name){
 
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
+// raw.githubusercontent.com can briefly serve a cached copy of latest_scan.json
+// right after a fresh push — retry until the fetched scan's own scan_time is
+// actually newer than this dispatch, instead of trusting the first response.
+async function fetchLatestScanFresh(dispatchTime, tries=6, delayMs=2500){
+  for (let i = 0; i < tries; i++){
+    try {
+      const res = await fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/scans/latest_scan.json?t=${Date.now()}`);
+      const scan = await res.json();
+      if (scan && scan.scan_time && new Date(scan.scan_time) >= new Date(dispatchTime)) return scan;
+    } catch (e) { /* try again */ }
+    await sleep(delayMs);
+  }
+  return null;
+}
+
 function setStatus(kind, title, detail){
   const p = document.getElementById('statusPanel');
   p.className = 'status-panel show' + (kind ? ' '+kind : '');
@@ -618,6 +647,11 @@ async function runScan(){
 
   document.getElementById('runBtn').disabled = true;
   setScanningLock(true);
+  // Clear any results left on screen from a previous scan — otherwise they sit there
+  // through the whole new dispatch/poll cycle and can look like "the new scan found
+  // the same thing", when really it's just stale leftover UI from the last run.
+  document.getElementById('resultsMiniMap').style.display = 'none';
+  if (resultsMiniMapInstance) { resultsMiniMapInstance.remove(); resultsMiniMapInstance = null; }
   const dispatchTime = new Date().toISOString();
   setStatus('', 'Dispatching…', `${label} · max ${maxPoints} points`);
 
@@ -657,9 +691,9 @@ async function runScan(){
 
     if (run.conclusion === 'success'){
       setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
-      fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/scans/latest_scan.json?t=${Date.now()}`)
-        .then(r => r.json())
+      fetchLatestScanFresh(dispatchTime)
         .then(scan => {
+          if (!scan) return; // gave up after retries — raw.githubusercontent.com hadn't caught up; Coverage Map tab will have it
           const link = document.getElementById('pdfLink');
           if (link) link.onclick = (e) => { e.preventDefault(); downloadScanPDF(scan); };
           renderResultsMiniMap(scan);

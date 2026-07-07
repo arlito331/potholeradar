@@ -130,5 +130,31 @@
     "scan_time": "2026-07-06T18:17:17Z",
     "points_scanned": 20,
     "potholes_found": 0
+  },
+  {
+    "scan_id": "PR-20260707-031411",
+    "mode": "street",
+    "country": "Panama",
+    "city": "Test Street",
+    "center_lat": 8.9834,
+    "center_lng": -79.5199,
+    "radius_km": null,
+    "path": [
+      [
+        8.9824,
+        -79.5199
+      ],
+      [
+        8.9834,
+        -79.5199
+      ],
+      [
+        8.9844,
+        -79.5199
+      ]
+    ],
+    "scan_time": "2026-07-07T03:14:11Z",
+    "points_scanned": 5,
+    "potholes_found": 0
   }
 ]

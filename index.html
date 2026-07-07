@@ -496,23 +496,21 @@ async function runScan(){
       run = (data.workflow_runs||[]).find(r => new Date(r.created_at) >= new Date(dispatchTime));
     }
     if (!run) {
-      setStatus('error', 'Triggered, but could not confirm the run started.',
-        `<a href="https://github.com/${REPO_OWNER}/${REPO_NAME}/actions" target="_blank">Check GitHub Actions directly →</a>`);
+      setStatus('error', 'Triggered, but could not confirm the run started.', 'Try again in a moment.');
       document.getElementById('runBtn').disabled = false;
       setScanningLock(false);
       return;
     }
 
     while (run.status !== 'completed'){
-      setStatus('', `Scan ${run.status}…`,
-        `<a href="${run.html_url}" target="_blank">View live log →</a>`);
+      setStatus('', `Scan ${run.status}…`, '');
       await sleep(5000);
       const r = await ghFetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${run.id}`);
       run = await r.json();
     }
 
     if (run.conclusion === 'success'){
-      setStatus('success', '✅ Scan complete', `<a href="${run.html_url}" target="_blank">View log</a> · <a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
+      setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
       fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/scans/latest_scan.json?t=${Date.now()}`)
         .then(r => r.json())
         .then(scan => {
@@ -522,7 +520,7 @@ async function runScan(){
         })
         .catch(()=>{});
     } else {
-      setStatus('error', `❌ Scan ${run.conclusion}`, `<a href="${run.html_url}" target="_blank">View log for details →</a>`);
+      setStatus('error', `❌ Scan ${run.conclusion}`, 'Something went wrong during the scan.');
     }
   } catch (e){
     setStatus('error', 'Error triggering scan', e.message);

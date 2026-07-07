@@ -86,6 +86,11 @@ a{color:inherit;}
 .finding-card{background:var(--panel);border-radius:8px;padding:16px;margin-bottom:12px;border-left:3px solid var(--accent);}
 .finding-card.critical,.finding-card.severe{border-left-color:var(--red);}
 .finding-card.minor{border-left-color:var(--orange);}
+
+.mode-toggle{display:flex;gap:8px;margin-bottom:18px;}
+.mode-btn{background:transparent;border:1px solid var(--border);color:var(--dim);border-radius:5px;padding:7px 14px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;cursor:pointer;}
+.mode-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+.street-selection{margin-top:10px;font-size:12px;color:var(--muted);}
 </style>
 </head>
 <body>
@@ -111,6 +116,11 @@ a{color:inherit;}
 <div class="view active" id="view-scan">
 
   <div class="card">
+    <div class="mode-toggle">
+      <button type="button" class="mode-btn active" id="mode-radius" onclick="setScanMode('radius')">Radius</button>
+      <button type="button" class="mode-btn" id="mode-street" onclick="setScanMode('street')">Street</button>
+    </div>
+
     <div class="field">
       <label>Country</label>
       <select id="fCountry">
@@ -133,9 +143,15 @@ a{color:inherit;}
 
     <div id="scan-map" style="margin:10px 0;"></div>
 
-    <div class="field">
-      <label>Radius: <span id="radiusVal">2.0</span> km</label>
-      <input type="range" id="fRadius" min="0.2" max="5" step="0.1" value="2" style="width:100%;" oninput="onRadiusInput()"/>
+    <div id="streetFields" style="display:none;">
+      <div class="street-selection" id="streetSelection">No street selected — zoom in until roads appear, then click one.</div>
+    </div>
+
+    <div id="radiusFields">
+      <div class="field">
+        <label>Radius: <span id="radiusVal">2.0</span> km</label>
+        <input type="range" id="fRadius" min="0.2" max="5" step="0.1" value="2" style="width:100%;" oninput="onRadiusInput()"/>
+      </div>
     </div>
     <div class="field">
       <label>Max points</label>
@@ -224,15 +240,77 @@ function initScanMap(){
 
   scanMarker = L.marker(DEFAULT_CENTER, {draggable:true}).addTo(scanMap);
   scanCircle = L.circle(DEFAULT_CENTER, {radius: 2000, color:'#3F7FE0', fillColor:'#3F7FE0', fillOpacity:0.12, weight:2}).addTo(scanMap);
+  streetLayerGroup = L.layerGroup().addTo(scanMap);
 
   scanMarker.on('drag', (e) => { scanCircle.setLatLng(e.target.getLatLng()); });
   scanMarker.on('dragend', () => { lastSearchLabel = ''; updateSearchHint(); });
   scanMap.on('click', (e) => {
+    if (scanMode === 'street') return; // street mode selects by clicking a road line, not the map background
     scanMarker.setLatLng(e.latlng);
     scanCircle.setLatLng(e.latlng);
     lastSearchLabel = '';
     updateSearchHint();
   });
+  scanMap.on('moveend', () => { if (scanMode === 'street') loadStreetsInView(); });
+}
+
+// ═══════════════════════════ SCAN MODE (radius vs street) ═══════════════════════════
+
+let scanMode = 'radius', streetLayerGroup = null, selectedStreet = null;
+
+function setScanMode(mode){
+  scanMode = mode;
+  document.getElementById('mode-radius').classList.toggle('active', mode==='radius');
+  document.getElementById('mode-street').classList.toggle('active', mode==='street');
+  document.getElementById('radiusFields').style.display = mode==='radius' ? 'block' : 'none';
+  document.getElementById('streetFields').style.display = mode==='street' ? 'block' : 'none';
+
+  if (mode === 'street'){
+    scanMarker.setOpacity(0);
+    scanCircle.setStyle({opacity:0, fillOpacity:0});
+    loadStreetsInView();
+  } else {
+    scanMarker.setOpacity(1);
+    scanCircle.setStyle({opacity:1, fillOpacity:0.12});
+    streetLayerGroup.clearLayers();
+  }
+}
+window.setScanMode = setScanMode;
+
+async function loadStreetsInView(){
+  if (!scanMap) return;
+  if (scanMap.getZoom() < 15){
+    document.getElementById('streetSelection').textContent = selectedStreet
+      ? `Selected: ${selectedStreet.name} (${selectedStreet.path.length} pts)` : 'Zoom in further to load streets…';
+    return;
+  }
+  const b = scanMap.getBounds();
+  const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+  const query = `[out:json][timeout:25];way["highway"]["name"](${bbox});out geom;`;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: query });
+    const data = await res.json();
+    streetLayerGroup.clearLayers();
+    (data.elements||[]).forEach(way=>{
+      if (!way.geometry) return;
+      const coords = way.geometry.map(g=>[g.lat, g.lon]);
+      const line = L.polyline(coords, {color:'#3F7FE0', weight:5, opacity:0.35});
+      line.addTo(streetLayerGroup);
+      line.on('click', (e)=> { L.DomEvent.stopPropagation(e); selectStreet(way, coords, line); });
+      if (selectedStreet && selectedStreet.id === way.id) highlightLine(line);
+    });
+  } catch (e){
+    document.getElementById('streetSelection').textContent = 'Could not load streets — try panning/zooming again.';
+  }
+}
+
+function highlightLine(line){ line.setStyle({color:'#FF3B3B', weight:6, opacity:0.9}); }
+
+function selectStreet(way, coords, line){
+  streetLayerGroup.eachLayer(l => l.setStyle({color:'#3F7FE0', weight:5, opacity:0.35}));
+  highlightLine(line);
+  selectedStreet = { id: way.id, name: (way.tags && way.tags.name) || 'Unnamed road', path: coords };
+  document.getElementById('streetSelection').innerHTML = `Selected: <strong>${selectedStreet.name}</strong> (${coords.length} pts)`;
 }
 
 function updateSearchHint(){
@@ -368,16 +446,30 @@ async function runScan(){
 
   const country = document.getElementById('fCountry').value;
   const maxPoints = document.getElementById('fMaxPoints').value;
-  const radiusKm = document.getElementById('fRadius').value;
-  const latlng = scanMarker.getLatLng();
-  const cityLabel = lastSearchLabel || `Custom point (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
 
-  const inputs = {
-    country, city: cityLabel, radius_km: String(radiusKm),
-    lat: String(latlng.lat), lng: String(latlng.lng),
-    max_points: String(maxPoints),
-  };
-  const label = `${cityLabel}, ${country} · ${radiusKm}km`;
+  let inputs, label;
+  if (scanMode === 'street'){
+    if (!selectedStreet) { alert('Click a street on the map to select it.'); return; }
+    const mid = selectedStreet.path[Math.floor(selectedStreet.path.length/2)];
+    inputs = {
+      country, city: selectedStreet.name, radius_km: '0',
+      lat: String(mid[0]), lng: String(mid[1]),
+      max_points: String(maxPoints),
+      street_path: JSON.stringify(selectedStreet.path),
+    };
+    label = `${selectedStreet.name}, ${country} · street`;
+  } else {
+    const radiusKm = document.getElementById('fRadius').value;
+    const latlng = scanMarker.getLatLng();
+    const cityLabel = lastSearchLabel || `Custom point (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
+    inputs = {
+      country, city: cityLabel, radius_km: String(radiusKm),
+      lat: String(latlng.lat), lng: String(latlng.lng),
+      max_points: String(maxPoints),
+      street_path: '',
+    };
+    label = `${cityLabel}, ${country} · ${radiusKm}km`;
+  }
 
   document.getElementById('runBtn').disabled = true;
   setScanningLock(true);
@@ -447,8 +539,13 @@ function renderResultsMiniMap(scan){
   resultsMiniMapInstance = L.map('resultsMiniMap', {zoomControl:false, attributionControl:false})
     .setView([scan.center_lat, scan.center_lng], 15);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19, subdomains:'abcd'}).addTo(resultsMiniMapInstance);
-  const circle = L.circle([scan.center_lat, scan.center_lng], {radius:(scan.radius_km||1)*1000, color:'#3F7FE0', weight:1.5, fillOpacity:0.05}).addTo(resultsMiniMapInstance);
-  resultsMiniMapInstance.fitBounds(circle.getBounds(), {padding:[10,10]});
+  let shape;
+  if (scan.mode === 'street' && scan.path && scan.path.length > 1){
+    shape = L.polyline(scan.path, {color:'#3F7FE0', weight:4, opacity:0.6}).addTo(resultsMiniMapInstance);
+  } else {
+    shape = L.circle([scan.center_lat, scan.center_lng], {radius:(scan.radius_km||1)*1000, color:'#3F7FE0', weight:1.5, fillOpacity:0.05}).addTo(resultsMiniMapInstance);
+  }
+  resultsMiniMapInstance.fitBounds(shape.getBounds(), {padding:[10,10]});
   (scan.findings||[]).forEach(f=>{
     L.circleMarker([f.lat, f.lng], {radius:7, color:'#FF3B3B', fillColor:'#FF3B3B', fillOpacity:0.9, weight:1})
       .addTo(resultsMiniMapInstance)
@@ -510,7 +607,7 @@ function downloadScanPDF(scan){
   text('POTHOLERADAR', M, 10, ACCENT, 'bold'); y += 20;
   text('Scan Report', M, 22, TEXT, 'bold'); y += 22;
   text(`${scanAreaLabel(scan)}, ${scan.country}`, M, 12, MUTED); y += 16;
-  text(`Scanned ${new Date(scan.scan_time).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})} · ~${scan.radius_km}km radius`, M, 10, DIM); y += 24;
+  text(`Scanned ${new Date(scan.scan_time).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'})} · ${scan.mode==='street' ? 'street scan' : `~${scan.radius_km}km radius`}`, M, 10, DIM); y += 24;
 
   set('setDrawColor', BORDER); doc.setLineWidth(1); doc.line(M, y, W-M, y); y += 20;
 
@@ -592,17 +689,20 @@ function renderCoverageMap(){
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19, subdomains:'abcd'}).addTo(coverageMap);
 
   manifestScans.forEach(s=>{
-    if (!s.center_lat || !s.center_lng) return;
     const found = s.potholes_found > 0;
-    const circle = L.circle([s.center_lat, s.center_lng], {
-      radius: (s.radius_km||1)*1000,
-      color: found ? '#FF3B3B' : '#3F7FE0',
-      fillColor: found ? '#FF3B3B' : '#3F7FE0',
-      fillOpacity: 0.15, weight: 1.5,
-    }).addTo(coverageMap);
-    circle.bindPopup(`<div style="font-size:12px;font-weight:700;margin-bottom:4px;">${scanAreaLabel(s)}, ${s.country}</div>
-      <div style="font-size:10px;color:#999;margin-bottom:6px;">~${s.radius_km}km · ${s.points_scanned||0} points scanned</div>
-      <div style="font-size:11px;color:${found?'#FF3B3B':'#3F7FE0'};font-weight:700;">${s.potholes_found||0} pothole${s.potholes_found!==1?'s':''} found</div>
+    const color = found ? '#FF3B3B' : '#3F7FE0';
+    let layer;
+    if (s.mode === 'street' && s.path && s.path.length > 1){
+      layer = L.polyline(s.path, {color, weight:4, opacity:0.7}).addTo(coverageMap);
+    } else if (s.center_lat && s.center_lng){
+      layer = L.circle([s.center_lat, s.center_lng], {
+        radius: (s.radius_km||1)*1000, color, fillColor: color, fillOpacity: 0.15, weight: 1.5,
+      }).addTo(coverageMap);
+    } else return;
+    const subtitle = s.mode === 'street' ? 'street scan' : `~${s.radius_km}km`;
+    layer.bindPopup(`<div style="font-size:12px;font-weight:700;margin-bottom:4px;">${scanAreaLabel(s)}, ${s.country}</div>
+      <div style="font-size:10px;color:#999;margin-bottom:6px;">${subtitle} · ${s.points_scanned||0} points scanned</div>
+      <div style="font-size:11px;color:${color};font-weight:700;">${s.potholes_found||0} pothole${s.potholes_found!==1?'s':''} found</div>
       <a href="#" onclick="viewScanDetail('${s.scan_id}');return false;" style="display:inline-block;margin-top:6px;font-size:10px;color:#3F7FE0;">View findings →</a>`);
   });
 }
@@ -617,10 +717,11 @@ function renderScanList(){
   el.innerHTML = sorted.map(s=>{
     const found = s.potholes_found > 0;
     const date = s.scan_time ? new Date(s.scan_time).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+    const subtitle = s.mode === 'street' ? 'street scan' : `~${s.radius_km}km`;
     return `<div class="scan-row" onclick="viewScanDetail('${s.scan_id}')">
       <div class="scan-row-main">
         <div class="scan-row-title">${scanAreaLabel(s)}, ${s.country}</div>
-        <div class="scan-row-sub">${date} · ~${s.radius_km}km · ${s.points_scanned||0} points scanned</div>
+        <div class="scan-row-sub">${date} · ${subtitle} · ${s.points_scanned||0} points scanned</div>
       </div>
       <span class="badge ${found?'found':'clean'}">${s.potholes_found||0} found</span>
     </div>`;
@@ -647,7 +748,10 @@ async function viewScanDetail(scanId){
   detailMap = L.map('detail-map', {zoomControl:true, attributionControl:false}).setView([scan.center_lat, scan.center_lng], 14);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19, subdomains:'abcd'}).addTo(detailMap);
 
-  if (scan.boundary && scan.boundary.length){
+  if (scan.mode === 'street' && scan.path && scan.path.length > 1){
+    const line = L.polyline(scan.path, {color:'#3F7FE0', weight:4, opacity:0.6}).addTo(detailMap);
+    detailMap.fitBounds(line.getBounds(), {padding:[20,20]});
+  } else if (scan.boundary && scan.boundary.length){
     const poly = L.polygon(scan.boundary, {color:'#3F7FE0', weight:2, fillOpacity:0.08}).addTo(detailMap);
     detailMap.fitBounds(poly.getBounds(), {padding:[20,20]});
   } else if (scan.radius_km){

@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: ''
+      street_path:
+        description: 'JSON array of [lat,lng] pairs for a clicked street — leave blank for a radius scan'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   scan:
@@ -58,7 +63,8 @@ jobs:
             --radius-km "${{ inputs.radius_km }}" \
             --max-points "${{ inputs.max_points }}" \
             --lat "${{ inputs.lat }}" \
-            --lng "${{ inputs.lng }}"
+            --lng "${{ inputs.lng }}" \
+            --street-path '${{ inputs.street_path }}'
       - name: Commit scan report
         if: always()
         run: |

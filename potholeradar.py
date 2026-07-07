@@ -159,6 +159,49 @@ def generate_grid(center_lat, center_lng, radius_km, spacing_m=DEFAULT_SPACING_M
     return points
 
 
+def sample_along_path(path, spacing_m=DEFAULT_SPACING_M, max_points=DEFAULT_MAX_POINTS):
+    """
+    Walk a polyline (list of (lat, lng), e.g. a clicked OSM road) and pick
+    points every `spacing_m` meters, capped at `max_points`. Used for
+    street-mode scans where the user selected an exact road on the map
+    instead of a radius around a center point.
+    """
+    if len(path) < 2:
+        return list(path)
+
+    cumulative = [0.0]
+    for i in range(1, len(path)):
+        cumulative.append(cumulative[-1] + distance_km(*path[i - 1], *path[i]) * 1000)
+    total = cumulative[-1]
+    if total == 0:
+        return [path[0]]
+
+    n_points = min(max_points, max(2, int(total / spacing_m) + 1))
+    step = total / (n_points - 1)
+
+    points = []
+    seg = 0
+    for i in range(n_points):
+        target = i * step
+        while seg < len(cumulative) - 2 and cumulative[seg + 1] < target:
+            seg += 1
+        seg_len = cumulative[seg + 1] - cumulative[seg]
+        t = 0 if seg_len == 0 else (target - cumulative[seg]) / seg_len
+        lat = path[seg][0] + t * (path[seg + 1][0] - path[seg][0])
+        lng = path[seg][1] + t * (path[seg + 1][1] - path[seg][1])
+        points.append((lat, lng))
+
+    return points
+
+
+def decimate(path, n):
+    """Thin a polyline to ~n points for cheap storage/display (not for scanning)."""
+    if len(path) <= n:
+        return path
+    step = len(path) / n
+    return [path[int(i * step)] for i in range(n)]
+
+
 # ============================================================
 # STREET VIEW
 # ============================================================
@@ -386,7 +429,7 @@ def build_digest(scan):
     <div style="font-size:11px;letter-spacing:4px;color:{ACCENT};font-weight:700;">POTHOLERADAR · v1.2</div>
     <h1 style="margin:10px 0 6px;font-size:26px;color:{TEXT};font-weight:700;">{count} pothole{'s' if count != 1 else ''} found</h1>
     <div style="color:{MUTED};font-size:12px;margin-top:6px;">
-      {scan['city']}, {scan['country']} · {scan['radius_km']}km radius ·
+      {scan['city']}, {scan['country']} · {(str(scan['radius_km'])+'km radius') if scan.get('mode') != 'street' else 'street'} scan ·
       {scan['points_scanned']}/{scan['points_total']} points scanned ({scan['points_skipped_no_coverage']} skipped, no Street View coverage)
     </div>
   </div>
@@ -425,6 +468,8 @@ def main():
     parser.add_argument("--spacing-m", type=float, default=DEFAULT_SPACING_M)
     parser.add_argument("--lat", default="", help="Center latitude, if already resolved (e.g. from a map search) — skips geocoding")
     parser.add_argument("--lng", default="", help="Center longitude, if already resolved — skips geocoding")
+    parser.add_argument("--street-path", default="",
+                         help="JSON array of [lat,lng] pairs (a clicked road) — switches to street mode instead of a radius sweep")
     args = parser.parse_args()
 
     max_points = min(args.max_points, HARD_MAX_POINTS)
@@ -432,21 +477,39 @@ def main():
     scan_id = f"PR-{scan_time.strftime('%Y%m%d-%H%M%S')}"
     area_label = args.city or f"{args.lat}, {args.lng}"
 
-    print(f"🔵 PotholeRadar scan {scan_id} — {area_label}, {args.country} ({args.radius_km}km radius, max {max_points} points)")
-
-    if args.lat and args.lng:
-        center_lat, center_lng = float(args.lat), float(args.lng)
-        print(f"📍 Center (from map search): {center_lat:.5f}, {center_lng:.5f} ({area_label})")
-    else:
-        center_lat, center_lng, formatted = geocode_city(args.city, args.country, GOOGLE_MAPS_API_KEY)
-        if center_lat is None:
-            print(f"❌ Could not geocode '{args.city}, {args.country}' — aborting.")
+    street_path = None
+    if args.street_path.strip():
+        try:
+            raw = json.loads(args.street_path)
+            street_path = [(float(p[0]), float(p[1])) for p in raw]
+        except Exception as e:
+            print(f"❌ Could not parse --street-path: {e}")
             return
-        area_label = formatted
-        print(f"📍 Center: {center_lat:.5f}, {center_lng:.5f} ({formatted})")
+        if len(street_path) < 2:
+            print("❌ Street path needs at least 2 points — aborting.")
+            return
 
-    points = generate_grid(center_lat, center_lng, args.radius_km, args.spacing_m, max_points)
-    print(f"🗺️  Grid: {len(points)} points to check")
+    if street_path:
+        center_lat, center_lng = street_path[len(street_path) // 2]
+        print(f"🔵 PotholeRadar scan {scan_id} — street '{area_label}' in {args.country} (max {max_points} points)")
+        points = sample_along_path(street_path, args.spacing_m, max_points)
+        print(f"🛣️  Street: {len(points)} points along a {len(street_path)}-node road")
+    else:
+        print(f"🔵 PotholeRadar scan {scan_id} — {area_label}, {args.country} ({args.radius_km}km radius, max {max_points} points)")
+
+        if args.lat and args.lng:
+            center_lat, center_lng = float(args.lat), float(args.lng)
+            print(f"📍 Center (from map search): {center_lat:.5f}, {center_lng:.5f} ({area_label})")
+        else:
+            center_lat, center_lng, formatted = geocode_city(args.city, args.country, GOOGLE_MAPS_API_KEY)
+            if center_lat is None:
+                print(f"❌ Could not geocode '{args.city}, {args.country}' — aborting.")
+                return
+            area_label = formatted
+            print(f"📍 Center: {center_lat:.5f}, {center_lng:.5f} ({formatted})")
+
+        points = generate_grid(center_lat, center_lng, args.radius_km, args.spacing_m, max_points)
+        print(f"🗺️  Grid: {len(points)} points to check")
 
     findings = []
     debug_points = []  # one record per scanned point regardless of outcome, so a
@@ -518,8 +581,11 @@ def main():
 
     scan = {
         "scan_id": scan_id,
+        "mode": "street" if street_path else "radius",
         "country": args.country, "city": area_label,
-        "center_lat": center_lat, "center_lng": center_lng, "radius_km": args.radius_km,
+        "center_lat": center_lat, "center_lng": center_lng,
+        "radius_km": args.radius_km if not street_path else None,
+        "path": decimate(street_path, 60) if street_path else None,
         "grid_spacing_m": args.spacing_m, "max_points": max_points,
         "scan_time": scan_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "points_total": len(points), "points_scanned": points_scanned,
@@ -547,8 +613,10 @@ def main():
             manifest = []
     manifest.append({
         "scan_id": scan_id,
+        "mode": scan["mode"],
         "country": args.country, "city": area_label,
-        "center_lat": center_lat, "center_lng": center_lng, "radius_km": args.radius_km,
+        "center_lat": center_lat, "center_lng": center_lng, "radius_km": scan["radius_km"],
+        "path": scan["path"],
         "scan_time": scan["scan_time"],
         "points_scanned": points_scanned, "potholes_found": len(findings),
     })

@@ -11,7 +11,8 @@ Part of the PowerFix tool family: [PotholeWatch](https://github.com/arlito331/po
 3. For each point: check Street View **metadata** first (free) to skip points with no panorama coverage, then fetch 9 close-in Street View images — 8 compass headings at a narrow 40° FOV and steep -50° pitch, plus one very steep (-85°) straight-down shot. Deliberately no wide/shallow shots: a real false positive traced back to the model "confirming" a pothole from a barely-resolvable dark smudge far in the distance in a wide 90° FOV shot — every shot is now framed like a human tilting down and zooming in on the pavement itself, not a wide establishing view.
 4. Send all 9 images to Claude Vision with a strict "true pothole vs. damaged road" prompt — only confirmed potholes (a real hole with exposed base material, not cracks/patches/wear/drainage features/patch edges) at or above a confidence floor (`MIN_CONFIDENCE`) are recorded. Capped at 20 confirmed findings per scan for now (test-round limit — the scan stops early once it hits this, see `MAX_FINDINGS` in `potholeradar.py`).
 5. Write `scans/latest_scan.json` + an archived copy and a manifest entry in `scans/history/`, and try to email an HTML digest of findings if any were confirmed (a failure here — e.g. a bad Gmail OAuth secret — is logged but never blocks the scan results from being saved/committed).
-6. `index.html` (GitHub Pages) is the app: a **New Scan** tab (map + place search + adjustable radius slider) that triggers a scan directly from the browser, and a **Coverage Map** tab showing every scanned area across Latin America, with drill-down into each scan's individual findings. Both the "scan complete" state and the detail drill-down offer a **Download PDF Report** button — a client-side jsPDF report (no backend involved) listing every confirmed finding with its Street View image, severity, size, and coordinates.
+6. `index.html` (GitHub Pages) is the app: a **New Scan** tab (map + place search + adjustable radius slider, or a **Street** mode — see below) that triggers a scan directly from the browser, and a **Coverage Map** tab showing every scanned area across Latin America, with drill-down into each scan's individual findings. Both the "scan complete" state and the detail drill-down offer a **Download PDF Report** button — a client-side jsPDF report (no backend involved) listing every confirmed finding with its Street View image, severity, size, and coordinates.
+7. **Street mode**: instead of a radius, pan/zoom the map and click an actual road — it's fetched from OpenStreetMap's Overpass API client-side, rendered as a clickable line, and the scan then samples points along that exact road's geometry (`sample_along_path` in `potholeradar.py`) instead of tiling a circle. Coverage Map renders these as a line instead of a circle.
 
 ## Running a scan
 
@@ -22,7 +23,7 @@ The live app at `arlito331.github.io/potholeradar/` is the normal way to trigger
 3. Click **"Run Scan →"**. The page calls GitHub's `workflow_dispatch` API directly, then polls the run's status live until it completes, with a link to the full GitHub Actions log the whole time.
 4. Once complete, switch to **Coverage Map** to see it plotted, or click "View on Coverage Map" from the success message.
 
-This calls the same GitHub Actions workflow you can also trigger manually from **Actions → PotholeRadar Scan → Run workflow** on GitHub itself, with the same inputs (`country`, `city`, `radius_km`, `max_points`, and optionally `lat`/`lng` if you already know the exact center point) — the app is just a nicer front door to it, not a separate system.
+This calls the same GitHub Actions workflow you can also trigger manually from **Actions → PotholeRadar Scan → Run workflow** on GitHub itself, with the same inputs (`country`, `city`, `radius_km`, `max_points`, optionally `lat`/`lng` if you already know the exact center point, and optionally `street_path` — a JSON array of `[lat,lng]` pairs — for a street-mode scan) — the app is just a nicer front door to it, not a separate system.
 
 To run locally instead:
 
@@ -62,8 +63,7 @@ If you have confirmed real-world examples (or clear negatives) from manually bro
 
 ## Roadmap (not built yet)
 
-- Polygon/street drawing on the map instead of a circle (a District/Corregimiento/Barrio administrative-boundary approach was prototyped and shelved in favor of the simpler, universal map+search+radius picker — the real-boundary accuracy is still worth revisiting later)
-- OpenStreetMap/Overpass road-network snapping — sample grid points along actual streets instead of a raw lat/lng mesh (the real fix for wasted no-coverage points, biggest accuracy/cost improvement available)
+- Polygon drawing on the map instead of a circle (a District/Corregimiento/Barrio administrative-boundary approach was prototyped and shelved in favor of the simpler, universal map+search+radius picker — the real-boundary accuracy is still worth revisiting later; street-mode above covers the line-shaped case)
 - Waze/Google Places hazard corroboration as a cross-check on already-confirmed findings
 - Historical scan comparison/diffing (new pothole vs. previously seen at the same location)
 - Scheduled/cron scans (currently manual-trigger only)

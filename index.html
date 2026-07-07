@@ -149,8 +149,8 @@ a{color:inherit;}
 
     <div id="radiusFields">
       <div class="field">
-        <label>Radius: <span id="radiusVal">2.0</span> km</label>
-        <input type="range" id="fRadius" min="0.2" max="5" step="0.1" value="2" style="width:100%;" oninput="onRadiusInput()"/>
+        <label>Radius: <span id="radiusVal">0.40</span> km</label>
+        <input type="range" id="fRadius" min="0.05" max="5" step="0.05" value="0.4" style="width:100%;" oninput="onRadiusInput()"/>
       </div>
     </div>
     <div class="field">
@@ -239,7 +239,7 @@ function initScanMap(){
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19, subdomains:'abcd'}).addTo(scanMap);
 
   scanMarker = L.marker(DEFAULT_CENTER, {draggable:true}).addTo(scanMap);
-  scanCircle = L.circle(DEFAULT_CENTER, {radius: 2000, color:'#3F7FE0', fillColor:'#3F7FE0', fillOpacity:0.12, weight:2}).addTo(scanMap);
+  scanCircle = L.circle(DEFAULT_CENTER, {radius: 400, color:'#3F7FE0', fillColor:'#3F7FE0', fillOpacity:0.12, weight:2}).addTo(scanMap);
   streetLayerGroup = L.layerGroup().addTo(scanMap);
 
   scanMarker.on('drag', (e) => { scanCircle.setLatLng(e.target.getLatLng()); });
@@ -322,7 +322,7 @@ function updateSearchHint(){
 
 function onRadiusInput(){
   const km = parseFloat(document.getElementById('fRadius').value);
-  document.getElementById('radiusVal').textContent = km.toFixed(1);
+  document.getElementById('radiusVal').textContent = km < 1 ? km.toFixed(2) : km.toFixed(1);
   if (scanCircle) scanCircle.setRadius(km * 1000);
 }
 

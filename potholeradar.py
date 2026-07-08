@@ -462,6 +462,16 @@ yourself reason about severity in step 2:
         if match:
             result = json.loads(match.group())
             best_idx = min(result.get("best_image_index", 0), len(images) - 1)
+            # The model sometimes points best_image_index at the satellite
+            # frame, which is only meant to be supporting context (per the
+            # prompt) — a shadow-heavy top-down shot then becomes the sole
+            # image ever attached to the finding/candidate, making it
+            # unreviewable. Fall back to the closest street-level image
+            # instead whenever that happens.
+            if images[best_idx].get("kind") == "satellite":
+                street_idx = next((i for i, im in enumerate(images) if im.get("kind") != "satellite"), None)
+                if street_idx is not None:
+                    best_idx = street_idx
             # Code-level gate, not just trusting the model's own pothole_confirmed:
             # a categorical mismatch (e.g. drainage_infrastructure typed but
             # pothole_confirmed left true anyway) must never slip through.

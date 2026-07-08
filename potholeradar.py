@@ -374,10 +374,20 @@ NOT a pothole — do NOT confirm these:
 ❌ Road markings or paint
 ❌ Normal concrete expansion joints
 ❌ General road deterioration without visible holes
-❌ Depressions, grates, or dark patches immediately next to a drainage
-   opening/gutter/storm drain — these are usually intentional drainage
-   features (built to be lower, to channel water), not damage. Be extra
-   skeptical near drainage infrastructure specifically.
+❌ A drain, gutter, storm drain, or utility opening ITSELF — including
+   when its cover/grate is missing or broken. A rectangular or square
+   opening built into the curb/gutter junction, with masonry or concrete-
+   lined edges (not jagged broken asphalt), is constructed infrastructure,
+   not a pothole — even if it has real depth and even if you can
+   legitimately call it a hazard. This is a pothole/asphalt-damage sweep
+   specifically; a missing drain cover is a different kind of defect and
+   must NOT be confirmed as pothole_confirmed = true. The giveaway is
+   location and shape: sitting exactly at the curb/gutter edge, square or
+   rectangular with straight built edges, is drainage infrastructure. A
+   hole out in the road surface itself, with jagged irregular edges and
+   broken asphalt around it, is a real pothole. Also do not confirm
+   depressions, grates, or dark patches immediately NEXT TO a drain that
+   are just the drain's normal lower grading, not separate damage.
 ❌ A patch repair area where you're inferring a "separate" hole next to
    or within it — patches are often uneven or discolored at their own
    edges, which is easy to misread as an adjacent distinct pothole. If a

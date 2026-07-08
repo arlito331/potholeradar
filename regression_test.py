@@ -30,6 +30,12 @@ CASES = [
      "Sortis Hotel spot, Calle 57 Este — user-identified real pothole via "
      "manual Google Earth Street View review; automated scans have not yet "
      "confirmed it. Tracked here as an open recall gap, not a fixed bug."),
+    (8.986895, -79.519637, "asphalt_pothole", True,
+     "Caliope Steakhouse spot, Calle 57 Este (~18m from the Sortis Hotel "
+     "case above, same block) — user-identified real pothole via manual "
+     "Google Maps Street View review (both headings show dark irregular "
+     "pavement damage near the crosswalk). Automated scans have not yet "
+     "confirmed it. Tracked here as an open recall gap, not a fixed bug."),
 ]
 
 

@@ -346,7 +346,13 @@ Do this in two explicit steps, in order — do not skip straight to
 judging severity:
 
 STEP 1 — CLASSIFY what kind of feature is actually present. Pick exactly
-one, honestly, before you think about how bad it looks:
+one, honestly, before you think about how bad it looks. Base this
+classification on whichever images are actually legible — a blurry or
+artifacted image (see unclear_artifact below) means you ignore THAT
+IMAGE, not that you default the whole point to unclear_artifact. If
+even one of the {len(images)} images clearly shows the road surface,
+classify off that image, even if other images (especially the
+near-nadir "Down" shot) are unreadable.
 - asphalt_pothole: a hole/depression in the road's asphalt itself, where
   paving material is physically missing, with jagged irregular edges
   and exposed base layer. This is the ONLY category that can go on to
@@ -367,10 +373,14 @@ one, honestly, before you think about how bad it looks:
 - water_no_visible_hole: standing water/puddle where you cannot see any
   edge, depth, or exposed base material — just can't tell if there's
   damage underneath.
-- unclear_artifact: a flat, blurry, textureless gray/brown smear with no
-  discernible pavement texture — the known Street View near-nadir
-  stitching artifact, not real information. Disregard that specific
-  image and classify off the other angles instead.
+- unclear_artifact: use this ONLY if EVERY street-level image (not
+  counting the satellite frame) is a flat, blurry, textureless
+  gray/brown smear with no discernible pavement texture — the known
+  Street View near-nadir stitching artifact. If even one street-level
+  angle shows real, legible pavement, classify off THAT image instead —
+  do not choose unclear_artifact just because the "Down" shot alone is
+  bad. This category means "no usable image exists here," not "one of
+  the images was bad."
 - other_no_damage: anything else with no road-surface damage (paint,
   shadows, vehicles, vegetation, etc).
 

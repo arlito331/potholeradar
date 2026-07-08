@@ -36,6 +36,26 @@ CASES = [
      "Google Maps Street View review (both headings show dark irregular "
      "pavement damage near the crosswalk). Automated scans have not yet "
      "confirmed it. Tracked here as an open recall gap, not a fixed bug."),
+    (8.9745462, -79.5132098, "crack_only", False,
+     "Av. Italia near PH Ocean Front Penthouses — user-identified severe "
+     "concrete slab cracking via Google Maps Street View (Nov 2022 "
+     "capture); deep open cracks across multiple slabs but no clearly "
+     "resolved missing-asphalt hole in this exact frame. Inside the "
+     "2026-07-08 radius scan (8.9735,-79.5131) that returned no confirmed "
+     "findings there — expected values are a best guess pending the "
+     "actual pipeline result, not a locked-in requirement."),
+    (8.9744129, -79.5128017, "asphalt_pothole", True,
+     "C. Heliodoro Patino near PH Ocean Front Penthouses — user-identified "
+     "dark irregular hole next to the street-name pavement stencil via "
+     "Google Maps Street View (Nov 2022 capture). Inside the same "
+     "2026-07-08 radius scan. Open recall gap, not yet confirmed by the "
+     "automated pipeline."),
+    (8.9742028, -79.5126287, "patch_repair", False,
+     "C. Heliodoro Patino, ~25m further along the same block — "
+     "user-identified extensively cracked/patched road surface via "
+     "Google Maps Street View (Nov 2022 capture), spanning the full lane "
+     "width near parked cars. Inside the same 2026-07-08 radius scan. "
+     "Open recall gap, not yet confirmed by the automated pipeline."),
 ]
 
 

@@ -330,5 +330,19 @@
     "points_scanned": 3,
     "potholes_found": 0,
     "candidates_found": 2
+  },
+  {
+    "scan_id": "PR-20260708-020540",
+    "mode": "radius",
+    "country": "Panama",
+    "city": "Custom point (8.9735, -79.5131)",
+    "center_lat": 8.973518718398152,
+    "center_lng": -79.51305627822877,
+    "radius_km": 0.15,
+    "path": null,
+    "scan_time": "2026-07-08T02:05:40Z",
+    "points_scanned": 38,
+    "potholes_found": 0,
+    "candidates_found": 21
   }
 ]

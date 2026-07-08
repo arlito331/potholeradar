@@ -293,5 +293,19 @@
     "scan_time": "2026-07-08T00:34:32Z",
     "points_scanned": 15,
     "potholes_found": 1
+  },
+  {
+    "scan_id": "PR-20260708-013227",
+    "mode": "radius",
+    "country": "Panama",
+    "city": "Calle 57 Este",
+    "center_lat": 8.987058,
+    "center_lng": -79.519703,
+    "radius_km": 0.08,
+    "path": null,
+    "scan_time": "2026-07-08T01:32:27Z",
+    "points_scanned": 15,
+    "potholes_found": 0,
+    "candidates_found": 11
   }
 ]

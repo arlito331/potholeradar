@@ -260,13 +260,14 @@ function initScanMap(){
   streetLayerGroup = L.layerGroup().addTo(scanMap);
 
   scanMarker.on('drag', (e) => { scanCircle.setLatLng(e.target.getLatLng()); });
-  scanMarker.on('dragend', () => { lastSearchLabel = ''; updateSearchHint(); });
+  scanMarker.on('dragend', () => { lastSearchLabel = ''; updateSearchHint(); clearScanStatus(); });
   scanMap.on('click', (e) => {
     if (scanMode === 'street') { handleStreetClick(e.latlng); return; }
     scanMarker.setLatLng(e.latlng);
     scanCircle.setLatLng(e.latlng);
     lastSearchLabel = '';
     updateSearchHint();
+    clearScanStatus();
   });
   scanMap.on('moveend', () => { if (scanMode === 'street') loadStreetsInView(); });
 }
@@ -284,6 +285,7 @@ let scanMode = 'radius', streetLayerGroup = null, selectedStreet = null, trimPoi
 
 function setScanMode(mode){
   scanMode = mode;
+  clearScanStatus();
   document.getElementById('mode-radius').classList.toggle('active', mode==='radius');
   document.getElementById('mode-street').classList.toggle('active', mode==='street');
   document.getElementById('radiusFields').style.display = mode==='radius' ? 'block' : 'none';
@@ -389,6 +391,7 @@ function handleStreetClick(latlng){
 function selectStreet(way, coords){
   selectedStreet = { id: way.id, name: (way.tags && way.tags.name) || 'Unnamed road', fullPath: coords, path: coords };
   trimPoints = [];
+  clearScanStatus();
   loadStreetsInView();
   updateStreetSelectionText();
 }
@@ -491,6 +494,7 @@ function applySearchResult(r){
   lastSearchLabel = r.display_name.split(',').slice(0,3).join(',');
   updateSearchHint();
   clearSearchResults();
+  clearScanStatus();
 }
 window.applySearchResult = applySearchResult;
 
@@ -518,6 +522,7 @@ async function searchPlace(){
     scanCircle.setLatLng([lat,lng]);
     lastSearchLabel = `Exact coordinates (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
     updateSearchHint();
+    clearScanStatus();
     return;
   }
 
@@ -599,6 +604,19 @@ function setScanningLock(locked){
   const tab = document.getElementById('tab-coverage');
   tab.disabled = locked;
   tab.title = locked ? 'Wait for the current scan to finish' : '';
+}
+
+// The success/error panel and results preview only update when a scan actually
+// runs — left alone, they keep showing whatever ran last even after you change
+// mode, search a new place, or pick a different street, which reads as "results
+// for my current selection" when it's really stale. Clear them the moment the
+// selection changes so there's never ambiguity about what's being shown.
+function clearScanStatus(){
+  const p = document.getElementById('statusPanel');
+  if (p) p.className = 'status-panel';
+  const mini = document.getElementById('resultsMiniMap');
+  if (mini) mini.style.display = 'none';
+  if (resultsMiniMapInstance) { resultsMiniMapInstance.remove(); resultsMiniMapInstance = null; }
 }
 
 async function ghFetch(url, opts={}){

@@ -89,6 +89,7 @@ a{color:inherit;}
 .finding-card{background:var(--panel);border-radius:8px;padding:16px;margin-bottom:12px;border-left:3px solid var(--accent);}
 .finding-card.critical,.finding-card.severe{border-left-color:var(--red);}
 .finding-card.minor{border-left-color:var(--orange);}
+.finding-card.candidate{border-left-color:var(--orange);opacity:0.85;}
 
 .mode-toggle{display:flex;gap:8px;margin-bottom:18px;}
 .mode-btn{background:transparent;border:1px solid var(--border);color:var(--dim);border-radius:5px;padding:7px 14px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;cursor:pointer;}
@@ -733,7 +734,7 @@ function renderResultsMiniMap(scan){
 
 // ═══════════════════════════ COVERAGE MAP ═══════════════════════════
 
-let coverageMap = null, detailMap = null, manifestScans = [], currentDetailScan = null, detailMarkers = {};
+let coverageMap = null, detailMap = null, manifestScans = [], currentDetailScan = null, detailMarkers = {}, candidateMarkers = {};
 
 async function loadCoverage(){
   document.getElementById('detailSection').style.display = 'none';
@@ -880,7 +881,7 @@ function renderCoverageMap(){
     const subtitle = s.mode === 'street' ? 'street scan' : `~${s.radius_km}km`;
     layer.bindPopup(`<div style="font-size:12px;font-weight:700;margin-bottom:4px;">${scanAreaLabel(s)}, ${s.country}</div>
       <div style="font-size:10px;color:#999;margin-bottom:6px;">${subtitle} · ${s.points_scanned||0} points scanned</div>
-      <div style="font-size:11px;color:${color};font-weight:700;">${s.potholes_found||0} pothole${s.potholes_found!==1?'s':''} found</div>
+      <div style="font-size:11px;color:${color};font-weight:700;">${s.potholes_found||0} pothole${s.potholes_found!==1?'s':''} found${s.candidates_found?` · ${s.candidates_found} other flagged`:''}</div>
       <a href="#" onclick="viewScanDetail('${s.scan_id}');return false;" style="display:inline-block;margin-top:6px;font-size:10px;color:#3F7FE0;">View findings →</a>`);
   });
 }
@@ -901,7 +902,7 @@ function renderScanList(){
         <div class="scan-row-title">${scanAreaLabel(s)}, ${s.country}</div>
         <div class="scan-row-sub">${date} · ${subtitle} · ${s.points_scanned||0} points scanned</div>
       </div>
-      <span class="badge ${found?'found':'clean'}">${s.potholes_found||0} found</span>
+      <span class="badge ${found?'found':'clean'}">${s.potholes_found||0} found${s.candidates_found?` · ${s.candidates_found} flagged`:''}</span>
     </div>`;
   }).join('');
 }
@@ -944,13 +945,15 @@ async function viewScanDetail(scanId){
       icon: L.divIcon({html:`<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 36 36"><circle cx="18" cy="18" r="8" fill="${color}"/></svg>`, className:'', iconSize:[28,28], iconAnchor:[14,14]})
     }).addTo(detailMap).bindPopup(`<div style="font-size:10px;color:${color};font-weight:700;text-transform:uppercase;margin-bottom:4px;">${f.severity}</div><div style="font-size:12px;">${f.description||''}</div>`);
   });
+  candidateMarkers = {};
+  (scan.candidates||[]).forEach((c, i)=>{
+    candidateMarkers[i] = L.marker([c.lat, c.lng], {
+      icon: L.divIcon({html:`<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 36 36"><circle cx="18" cy="18" r="7" fill="#F0A030" fill-opacity="0.55" stroke="#F0A030" stroke-width="2"/></svg>`, className:'', iconSize:[22,22], iconAnchor:[11,11]})
+    }).addTo(detailMap).bindPopup(`<div style="font-size:10px;color:#F0A030;font-weight:700;text-transform:uppercase;margin-bottom:4px;">${featureTypeLabel(c.feature_type)}</div><div style="font-size:12px;">${c.description||''}</div>`);
+  });
 
   const fEl = document.getElementById('detailFindings');
-  if (!scan.findings || !scan.findings.length){
-    fEl.innerHTML = '<div class="empty-state">No potholes confirmed in this scan.</div>';
-    return;
-  }
-  fEl.innerHTML = scan.findings.map((f,i)=>`
+  const findingsHtml = (scan.findings && scan.findings.length) ? scan.findings.map((f,i)=>`
     <div class="finding-card ${f.severity}" onclick="detailMarkers[${i}] && detailMap.setView([${f.lat},${f.lng}],18); detailMarkers[${i}] && detailMarkers[${i}].openPopup();" style="cursor:pointer;">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
         <span style="font-size:10px;font-weight:700;letter-spacing:1px;color:${SEVERITY_COLOR[f.severity]};text-transform:uppercase;">${f.severity}</span>
@@ -960,7 +963,27 @@ async function viewScanDetail(scanId){
       <div style="font-size:13px;margin-bottom:6px;">${f.description||''}</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Ø${f.estimated_diameter_m||0}m · ${f.estimated_depth_cm||0}cm deep · risk: ${f.accident_risk||'?'} · ${f.lat?.toFixed(5)}, ${f.lng?.toFixed(5)}</div>
       <a href="${f.maps_link||''}" target="_blank" onclick="event.stopPropagation();" style="font-size:10px;color:${SEVERITY_COLOR[f.severity]};">📍 Open in Google Maps →</a>
-    </div>`).join('');
+    </div>`).join('') : '<div class="empty-state">No potholes confirmed in this scan.</div>';
+
+  const candidatesHtml = (scan.candidates && scan.candidates.length) ? `
+    <div style="font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin:24px 0 12px;">Other flagged features — needs review (${scan.candidates.length})</div>
+    ${scan.candidates.map((c,i)=>`
+    <div class="finding-card candidate" onclick="candidateMarkers[${i}] && detailMap.setView([${c.lat},${c.lng}],18); candidateMarkers[${i}] && candidateMarkers[${i}].openPopup();" style="cursor:pointer;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:10px;font-weight:700;letter-spacing:1px;color:#F0A030;text-transform:uppercase;">${featureTypeLabel(c.feature_type)}</span>
+        <span style="font-size:10px;color:var(--dim);">${c.confidence_visual||0}% confidence</span>
+      </div>
+      ${c.image_b64 ? `<img src="data:image/jpeg;base64,${c.image_b64}" style="width:100%;max-width:280px;border-radius:6px;margin-bottom:8px;display:block;"/>` : ''}
+      <div style="font-size:13px;margin-bottom:6px;">${c.description||''}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">${c.lat?.toFixed(5)}, ${c.lng?.toFixed(5)}</div>
+      <a href="${c.maps_link||''}" target="_blank" onclick="event.stopPropagation();" style="font-size:10px;color:#F0A030;">📍 Open in Google Maps →</a>
+    </div>`).join('')}` : '';
+
+  fEl.innerHTML = findingsHtml + candidatesHtml;
+}
+
+function featureTypeLabel(t){
+  return (t||'unclear').replace(/_/g,' ');
 }
 window.viewScanDetail = viewScanDetail;
 

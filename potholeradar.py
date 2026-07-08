@@ -589,6 +589,12 @@ def main():
         print(f"🗺️  Grid: {len(points)} points to check")
 
     findings = []
+    candidates = []  # broad recall net: every point that isn't plain clean pavement
+                      # (drains, patches, cracks, unconfirmed/low-confidence potholes,
+                      # unclear artifacts) — not just the strict confirmed findings.
+                      # The strict pass has been prone to both false positives and
+                      # false negatives on its own; this gives a human something wider
+                      # to triage instead of only trusting the one-shot verdict.
     debug_points = []  # one record per scanned point regardless of outcome, so a
                         # "0 found" run can actually be inspected instead of guessed at
     errors = []
@@ -629,6 +635,18 @@ def main():
                 "debug_image_b64": debug_img,
             })
 
+            feature_type = result.get("feature_type", "?")
+            if feature_type not in ("normal_wear", "other_no_damage"):
+                candidates.append({
+                    "lat": lat, "lng": lng,
+                    "feature_type": feature_type,
+                    "pothole_confirmed": confirmed,
+                    "description": result.get("description", ""),
+                    "confidence_visual": result.get("confidence_visual", 0),
+                    "image_b64": best_b64,
+                    "maps_link": f"https://maps.google.com/?q={lat},{lng}",
+                })
+
             if confirmed:
                 print(f"🕳️  POTHOLE — {result.get('severity','?')}, Ø{result.get('estimated_diameter_m',0)}m")
                 findings.append({
@@ -651,6 +669,8 @@ def main():
                     break
             elif low_confidence:
                 print(f"clear (model flagged it but only {result.get('confidence_visual',0)}% confident — below the {MIN_CONFIDENCE}% floor)")
+            elif feature_type not in ("normal_wear", "other_no_damage"):
+                print(f"clear, but flagged as candidate ({feature_type})")
             else:
                 print("clear")
         except Exception as e:
@@ -673,6 +693,8 @@ def main():
         "points_skipped_no_coverage": points_skipped,
         "potholes_found": len(findings),
         "findings": findings,
+        "candidates_found": len(candidates),
+        "candidates": candidates,
         "debug_points": debug_points,
         "errors": errors,
     }
@@ -700,11 +722,13 @@ def main():
         "path": scan["path"],
         "scan_time": scan["scan_time"],
         "points_scanned": points_scanned, "potholes_found": len(findings),
+        "candidates_found": len(candidates),
     })
     with open(manifest_path, "w") as fh:
         json.dump(manifest, fh, indent=2)
 
-    print(f"\n✅ Scan complete: {len(findings)} pothole(s) found, {points_scanned} scanned, {points_skipped} skipped, {len(errors)} error(s)")
+    print(f"\n✅ Scan complete: {len(findings)} pothole(s) found, {len(candidates)} other candidate(s) flagged for review, "
+          f"{points_scanned} scanned, {points_skipped} skipped, {len(errors)} error(s)")
 
     if findings:
         try:

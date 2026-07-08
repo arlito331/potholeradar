@@ -295,10 +295,15 @@ def fetch_top_down_image(lat, lng, google_key):
         r = requests.get(
             "https://maps.googleapis.com/maps/api/staticmap",
             params={"center": f"{lat},{lng}", "zoom": 20, "size": "640x640",
-                    "maptype": "satellite", "scale": 2, "key": google_key},
+                    "maptype": "satellite", "scale": 2, "format": "jpg", "key": google_key},
             timeout=15,
         )
-        if r.status_code == 200 and len(r.content) > 8000:
+        # Trust the Content-Type header, not the requested format param — a
+        # mismatched media_type sent to Claude (e.g. actual PNG bytes
+        # declared as image/jpeg) fails the ENTIRE multi-image Vision call,
+        # not just this one image, silently zeroing out every finding for
+        # the point. Skip rather than guess if it's not really a JPEG.
+        if r.status_code == 200 and len(r.content) > 8000 and "image/jpeg" in r.headers.get("Content-Type", ""):
             return {"label": "Top-down (satellite)", "kind": "satellite",
                     "b64": base64.b64encode(r.content).decode("utf-8")}
     except Exception:

@@ -342,7 +342,41 @@ You are a road damage expert conducting a systematic infrastructure sweep.
 There is no prior report for this location — you are scanning it blind as
 part of an area survey. Examine ALL {len(images)} images carefully.
 
-CRITICAL DISTINCTION — Pothole vs Damaged Road:
+Do this in two explicit steps, in order — do not skip straight to
+judging severity:
+
+STEP 1 — CLASSIFY what kind of feature is actually present. Pick exactly
+one, honestly, before you think about how bad it looks:
+- asphalt_pothole: a hole/depression in the road's asphalt itself, where
+  paving material is physically missing, with jagged irregular edges
+  and exposed base layer. This is the ONLY category that can go on to
+  be confirmed as a pothole in step 2.
+- drainage_infrastructure: a drain, gutter, storm drain, manhole, or
+  utility opening — even with a missing/broken cover, even with real
+  visible depth. Constructed openings (square/rectangular, masonry or
+  concrete-lined straight edges, sitting exactly at a curb/gutter
+  junction) are infrastructure, not pavement failure, no matter how
+  hazardous they look. This is a pothole/asphalt-damage sweep
+  specifically — a missing drain cover is a real hazard but a different
+  category of defect, and must never be typed as asphalt_pothole.
+- patch_repair: a prior repair patch (darker/lighter rectangle), including
+  uneven or discolored edges of the patch itself.
+- crack_only: surface cracks, even large ones, with no missing asphalt.
+- normal_wear: rough/worn texture, expansion joints, general
+  deterioration with no discrete hole.
+- water_no_visible_hole: standing water/puddle where you cannot see any
+  edge, depth, or exposed base material — just can't tell if there's
+  damage underneath.
+- unclear_artifact: a flat, blurry, textureless gray/brown smear with no
+  discernible pavement texture — the known Street View near-nadir
+  stitching artifact, not real information. Disregard that specific
+  image and classify off the other angles instead.
+- other_no_damage: anything else with no road-surface damage (paint,
+  shadows, vehicles, vegetation, etc).
+
+STEP 2 — ONLY IF you classified asphalt_pothole above, assess it against
+this checklist. If you classified anything else, pothole_confirmed must
+be false regardless of how the rest of this checklist reads.
 
 A TRUE POTHOLE (hueco/bache) is:
 ✅ A HOLE or DEPRESSION where asphalt is PHYSICALLY MISSING
@@ -357,49 +391,20 @@ Typical signs:
 - Sometimes debris (gravel, dirt, straw) collects inside
 - Multiple potholes often cluster together
 
-NOT a pothole — do NOT confirm these:
-❌ Surface cracks (even large ones) without missing asphalt
-❌ Rough or worn road texture
-❌ Patch repairs (darker square/rectangle repairs)
-❌ Standing water or a puddle with NO visible edges, depth, or exposed
-   base material anywhere around or beneath it — water pools on flat,
-   sloped, or unevenly worn pavement all the time without an actual hole
-   underneath, so water alone is never enough on its own. But don't
-   reflexively reject anything with water in it: if you can see broken/
-   jagged pavement edges, an irregular depression outline, or exposed
-   base material breaking the waterline — even if partially obscured by
-   the water itself — that IS sufficient to confirm a real pothole.
-   Partial visibility due to water, glare, or shadow is not disqualifying
-   as long as the visible portion clearly shows a genuine hole.
-❌ Road markings or paint
-❌ Normal concrete expansion joints
-❌ General road deterioration without visible holes
-❌ A drain, gutter, storm drain, or utility opening ITSELF — including
-   when its cover/grate is missing or broken. A rectangular or square
-   opening built into the curb/gutter junction, with masonry or concrete-
-   lined edges (not jagged broken asphalt), is constructed infrastructure,
-   not a pothole — even if it has real depth and even if you can
-   legitimately call it a hazard. This is a pothole/asphalt-damage sweep
-   specifically; a missing drain cover is a different kind of defect and
-   must NOT be confirmed as pothole_confirmed = true. The giveaway is
-   location and shape: sitting exactly at the curb/gutter edge, square or
-   rectangular with straight built edges, is drainage infrastructure. A
-   hole out in the road surface itself, with jagged irregular edges and
-   broken asphalt around it, is a real pothole. Also do not confirm
-   depressions, grates, or dark patches immediately NEXT TO a drain that
-   are just the drain's normal lower grading, not separate damage.
+Two borderline cases worth extra care, even after you've already typed
+something as asphalt_pothole in step 1:
+❌ Standing water covering part of an otherwise-real hole: don't
+   reflexively reject it — if you can see broken/jagged pavement edges,
+   an irregular depression outline, or exposed base material breaking
+   the waterline, even partially obscured by the water itself, that IS
+   sufficient to confirm. But if water is the ONLY thing you can point
+   to (no visible edge/depth anywhere), that's water_no_visible_hole
+   from step 1, not asphalt_pothole.
 ❌ A patch repair area where you're inferring a "separate" hole next to
    or within it — patches are often uneven or discolored at their own
-   edges, which is easy to misread as an adjacent distinct pothole. If a
-   patch is present, only confirm a pothole if it is clearly and fully
-   separate from the patch, not touching or bordering it.
-❌ A flat, blurry, textureless gray/brown smear with no discernible
-   pavement texture, lane markings, or edges — this is a known Street
-   View stitching artifact from very steep/close camera angles, not
-   water, not a hole, not evidence of anything. If an image looks like
-   this, disregard that specific image entirely and base your judgment
-   on the other, clearer angles — don't guess at what an unreadable
-   image might be showing.
+   edges, which is easy to misread as an adjacent distinct pothole. Only
+   confirm a pothole here if it's clearly and fully separate from the
+   patch, not touching or bordering it.
 
 This is a systematic sweep, not a spot-check — the goal is to find every
 real pothole in these images, not just the most obvious one. Look
@@ -408,10 +413,6 @@ frame edges and smaller/shallower holes, not only large dramatic ones.
 A pothole confirmed at 0.2m across with a shallow 3cm depth is just as
 valid a finding as a large severe one — use the severity field to convey
 how bad it is, don't let severity affect whether you confirm it at all.
-If water is pooling, you must still be able to see a genuine hole
-(depth, broken edges, or exposed base material breaking the water's
-surface) to confirm it — inferring a hole merely because water is
-sitting somewhere is exactly the kind of guess this task must avoid.
 
 pothole_confirmed = true only if you can actually SEE a hole with
 missing asphalt — not infer one from indirect evidence like pooling,
@@ -427,9 +428,12 @@ smudge far in the background that you're guessing might be a hole. If
 something is too far away or too small in frame to be sure, don't
 confirm it, and don't let it inflate confidence_visual either.
 
-Respond ONLY in this JSON format:
+Respond ONLY in this JSON format. Fill feature_type first, before
+pothole_confirmed — commit to step 1's classification before you let
+yourself reason about severity in step 2:
 {{
   "best_image_index": 0,
+  "feature_type": "asphalt_pothole/drainage_infrastructure/patch_repair/crack_only/normal_wear/water_no_visible_hole/unclear_artifact/other_no_damage",
   "pothole_found": true/false,
   "pothole_confirmed": true/false,
   "best_heading": 0,
@@ -458,7 +462,10 @@ Respond ONLY in this JSON format:
         if match:
             result = json.loads(match.group())
             best_idx = min(result.get("best_image_index", 0), len(images) - 1)
-            confirmed = result.get("pothole_confirmed", False)
+            # Code-level gate, not just trusting the model's own pothole_confirmed:
+            # a categorical mismatch (e.g. drainage_infrastructure typed but
+            # pothole_confirmed left true anyway) must never slip through.
+            confirmed = result.get("pothole_confirmed", False) and result.get("feature_type") == "asphalt_pothole"
             return images[best_idx]["b64"], result, confirmed
     except Exception as e:
         print(f"   Vision analysis failed: {e}")

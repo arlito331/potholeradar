@@ -58,17 +58,20 @@ SEVERITY_COLORS = {
     "minor":    "#F0A030",
 }
 
-DEFAULT_SPACING_M  = 25  # real Street View panoramas run every ~10-15m along a road;
-                          # 130m spacing meant a small targeted scan could easily miss
-                          # the exact spot entirely. max_points still caps the total via
-                          # thinning, so this just makes small-radius scans much denser.
+DEFAULT_SPACING_M  = 15  # real Street View panoramas run every ~10-15m along a road;
+                          # sitting close to that native interval instead of thinning it out
+                          # further means fewer gaps between sampled points, at the cost of
+                          # more points fetched for the same radius/street length.
 DEFAULT_MAX_POINTS = 150
 HARD_MAX_POINTS    = 500
 MAX_FINDINGS       = 20  # test-round cap: stop scanning once this many potholes are confirmed
-MIN_CONFIDENCE     = 70  # code-level floor: several real false positives clustered at 62-65%
+MIN_CONFIDENCE     = 55  # code-level floor: several real false positives clustered at 62-65%
                           # confidence_visual (inferring from water/drainage/patches rather than
                           # directly seeing a hole) — don't rely solely on the model's own
-                          # pothole_confirmed flag, also require it to say it's reasonably sure
+                          # pothole_confirmed flag, also require it to say it's reasonably sure.
+                          # Lowered from 70: real confirmed potholes were being rejected here too,
+                          # not just false positives — 70 was tuned purely against the false-positive
+                          # side and never checked against real misses.
 
 SCAN_DIR    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scans")
 HISTORY_DIR = os.path.join(SCAN_DIR, "history")
@@ -275,6 +278,34 @@ def fetch_street_view_angles(lat, lng, google_key):
     return images
 
 
+def fetch_top_down_image(lat, lng, google_key):
+    """
+    Best-effort top-down satellite/aerial shot via the Static Maps API, as a
+    supplementary angle alongside Street View. `scale=2` doubles the pixel
+    density at the same geographic extent (up to 1280x1280) without needing
+    a deeper zoom level, which is the main lever available for sharpness.
+
+    This is NOT a substitute for the Street View angles — satellite
+    resolution in most regions (especially outside major US/EU metros) is
+    coarse relative to a pothole's real size (tens of cm), and imagery can
+    be months or years stale. It's included as corroborating context only;
+    identify_pothole_in_images is told explicitly not to rely on it alone.
+    """
+    try:
+        r = requests.get(
+            "https://maps.googleapis.com/maps/api/staticmap",
+            params={"center": f"{lat},{lng}", "zoom": 20, "size": "640x640",
+                    "maptype": "satellite", "scale": 2, "key": google_key},
+            timeout=15,
+        )
+        if r.status_code == 200 and len(r.content) > 8000:
+            return {"label": "Top-down (satellite)", "kind": "satellite",
+                    "b64": base64.b64encode(r.content).decode("utf-8")}
+    except Exception:
+        pass
+    return None
+
+
 # ============================================================
 # CLAUDE VISION — POTHOLE DETECTION
 # ============================================================
@@ -293,8 +324,11 @@ def identify_pothole_in_images(images, lat, lng):
     try:
         content = []
         for i, img in enumerate(images):
-            content.append({"type": "text",
-                "text": f"Image {i+1}/{len(images)} — Street View facing {img['label']} at {lat:.5f}, {lng:.5f}:"})
+            caption = (f"Image {i+1}/{len(images)} — top-down satellite/aerial view (often low-resolution "
+                       f"or outdated; use only as supporting context, never as your sole evidence) at "
+                       f"{lat:.5f}, {lng:.5f}:") if img.get("kind") == "satellite" else (
+                       f"Image {i+1}/{len(images)} — Street View facing {img['label']} at {lat:.5f}, {lng:.5f}:")
+            content.append({"type": "text", "text": caption})
             content.append({"type": "image",
                 "source": {"type": "base64", "media_type": "image/jpeg", "data": img["b64"]}})
 
@@ -322,10 +356,16 @@ NOT a pothole — do NOT confirm these:
 ❌ Surface cracks (even large ones) without missing asphalt
 ❌ Rough or worn road texture
 ❌ Patch repairs (darker square/rectangle repairs)
-❌ Standing water or a puddle where you CANNOT see a hole or missing
-   asphalt beneath it — water pools on flat, sloped, or unevenly worn
-   pavement all the time without an actual hole underneath. Water alone,
-   without visible depth/edges/missing material, is NOT enough.
+❌ Standing water or a puddle with NO visible edges, depth, or exposed
+   base material anywhere around or beneath it — water pools on flat,
+   sloped, or unevenly worn pavement all the time without an actual hole
+   underneath, so water alone is never enough on its own. But don't
+   reflexively reject anything with water in it: if you can see broken/
+   jagged pavement edges, an irregular depression outline, or exposed
+   base material breaking the waterline — even if partially obscured by
+   the water itself — that IS sufficient to confirm a real pothole.
+   Partial visibility due to water, glare, or shadow is not disqualifying
+   as long as the visible portion clearly shows a genuine hole.
 ❌ Road markings or paint
 ❌ Normal concrete expansion joints
 ❌ General road deterioration without visible holes
@@ -546,6 +586,10 @@ def main():
                 print("no images fetched, skipped")
                 points_skipped += 1
                 continue
+
+            top_down = fetch_top_down_image(lat, lng, GOOGLE_MAPS_API_KEY)
+            if top_down:
+                images = images + [top_down]
 
             best_b64, result, confirmed = identify_pothole_in_images(images, lat, lng)
             points_scanned += 1

@@ -307,5 +307,28 @@
     "points_scanned": 15,
     "potholes_found": 0,
     "candidates_found": 11
+  },
+  {
+    "scan_id": "PR-20260708-015800",
+    "mode": "street",
+    "country": "Panama",
+    "city": "Calle Heliodoro Pati\u00f1o",
+    "center_lat": 8.9735214,
+    "center_lng": -79.5137832,
+    "radius_km": null,
+    "path": [
+      [
+        8.9738224,
+        -79.513976
+      ],
+      [
+        8.9735214,
+        -79.5137832
+      ]
+    ],
+    "scan_time": "2026-07-08T01:58:00Z",
+    "points_scanned": 3,
+    "potholes_found": 0,
+    "candidates_found": 2
   }
 ]

@@ -56,6 +56,19 @@ CASES = [
      "Google Maps Street View (Nov 2022 capture), spanning the full lane "
      "width near parked cars. Inside the same 2026-07-08 radius scan. "
      "Open recall gap, not yet confirmed by the automated pipeline."),
+    (8.974323168882501, -79.512802, "other_no_damage", False,
+     "C. Heliodoro Patino, tight-spacing test point (2026-07-10) — "
+     "identify_pothole_in_images() previously returned "
+     "asphalt_pothole/confirmed=True with a detailed fabricated "
+     "description (jagged edges, exposed base, debris) for this exact "
+     "point; the saved representative image is verified by direct visual "
+     "inspection to show only parked cars and a driver, no pavement "
+     "damage anywhere in frame. Two other grid points 5m away resolved "
+     "to the identical Street View photo and got two different "
+     "conflicting verdicts (crack_only, crack_only) in the same run — "
+     "confirmed hallucination under uncertainty, not a missed detection. "
+     "This case exists to check that a fix stops the fabrication, not "
+     "just to check the exact label."),
 ]
 
 

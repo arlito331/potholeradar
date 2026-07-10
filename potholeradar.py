@@ -16,6 +16,7 @@ import json
 import math
 import time
 import base64
+import hashlib
 import argparse
 from datetime import datetime, timezone
 
@@ -491,6 +492,98 @@ yourself reason about severity in step 2:
         print(f"   Vision analysis failed: {e}")
 
     return images[0]["b64"] if images else None, {}, False
+
+
+def screen_image_for_damage(image, lat, lng, cache=None):
+    """
+    Cheap first-pass screen: does THIS ONE image show visible road-surface
+    damage? Judged alone, with a minimal yes/no schema, so a bad frame
+    can never contaminate the verdict on a different, legible image the
+    way bundling everything into one multi-image call does — and so
+    there's almost no schema surface area for the model to invent plausible
+    detail on a photo that shows nothing.
+
+    `cache` (optional dict keyed by image hash) lets one scan run judge
+    each unique Street View panorama exactly once, even when several
+    nearby grid points snap to the same photo — this is what stops the
+    same image from getting reheard, and re-hallucinated, on repeat.
+    """
+    key = hashlib.sha256(image["b64"].encode()).hexdigest()
+    if cache is not None and key in cache:
+        return cache[key]
+
+    result = {"damage_visible": False, "note": ""}
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=200,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": (
+                    f"Look ONLY at this one photo (Street View, facing "
+                    f"{image.get('label','?')}, near {lat:.5f}, {lng:.5f}). "
+                    "Does it show visible road-surface damage — a hole, "
+                    "crack, patch, or missing asphalt — that you can "
+                    "actually point to in THIS specific frame? Don't infer "
+                    "from what a similar street 'probably' looks like, and "
+                    "don't guess based on a caption or label. If the frame "
+                    "is a blurry, textureless near-nadir stitching artifact "
+                    "with no real pavement visible, that's "
+                    "damage_visible: false, not true — 'unclear' is not "
+                    "'yes'.\n\n"
+                    "Respond ONLY in this JSON format:\n"
+                    '{"damage_visible": true/false, "note": "one sentence, '
+                    "only if damage_visible is true, describing exactly "
+                    'what you see and where in frame"}'
+                )},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image["b64"]}},
+            ]}],
+        )
+        text = response.content[0].text.strip()
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+    except Exception as e:
+        print(f"   Screening failed: {e}")
+
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def identify_pothole_in_images_screened(images, lat, lng, cache=None):
+    """
+    Parallel path to identify_pothole_in_images(): screens each
+    street-level image individually first, then only runs the full
+    classify-and-confirm pass (with the detailed JSON schema) on whichever
+    images actually screened positive — instead of handing the model all
+    ~9-10 images at once and forcing one combined verdict across the whole
+    bundle, which is what let 'unclear_artifact' swallow points that had
+    legible damage in other angles, and let the model fabricate a
+    'confirmed' pothole for a photo that showed none.
+
+    Also cheaper on boring points: if nothing screens positive, this skips
+    the expensive multi-image classify call entirely.
+    """
+    if not images:
+        return None, {}, False
+
+    street_images = [im for im in images if im.get("kind") != "satellite"]
+    satellite_images = [im for im in images if im.get("kind") == "satellite"]
+
+    screened = [(im, screen_image_for_damage(im, lat, lng, cache)) for im in street_images]
+    hits = [im for im, r in screened if r.get("damage_visible")]
+
+    if not hits:
+        fallback = street_images[0]["b64"] if street_images else (images[0]["b64"] if images else None)
+        return fallback, {
+            "feature_type": "other_no_damage",
+            "pothole_confirmed": False,
+            "confidence_visual": 0,
+            "description": "No individual image screened positive for visible road-surface damage.",
+        }, False
+
+    return identify_pothole_in_images(hits + satellite_images, lat, lng)
 
 
 # ============================================================

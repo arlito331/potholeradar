@@ -940,10 +940,18 @@ async function runScan(){
   // the same thing", when really it's just stale leftover UI from the last run.
   document.getElementById('resultsMiniMap').style.display = 'none';
   if (resultsMiniMapInstance) { resultsMiniMapInstance.remove(); resultsMiniMapInstance = null; }
-  const dispatchTime = new Date().toISOString();
   setStatus('', 'Dispatching…', `${label} · max ${maxPoints} points`);
 
   try {
+    // Snapshot which runs already exist BEFORE dispatching, so "find my new
+    // run" can check run IDs against this set instead of comparing
+    // timestamps — a wall-clock comparison (created_at >= dispatchTime)
+    // silently matches an old, already-finished run whenever the browser's
+    // system clock is behind real time, which showed up tonight as a
+    // "Scan complete" status with no new GitHub Actions run ever created.
+    const priorRunsRes = await ghFetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=10`);
+    const priorRunIds = new Set((await priorRunsRes.json()).workflow_runs?.map(r => r.id) || []);
+
     const dispatchRes = await ghFetch(
       `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
       { method:'POST', body: JSON.stringify({ ref:'main', inputs }) }
@@ -958,9 +966,9 @@ async function runScan(){
     let run = null;
     for (let i=0; i<15 && !run; i++){
       await sleep(3000);
-      const runsRes = await ghFetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=5`);
+      const runsRes = await ghFetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=10`);
       const data = await runsRes.json();
-      run = (data.workflow_runs||[]).find(r => new Date(r.created_at) >= new Date(dispatchTime));
+      run = (data.workflow_runs||[]).find(r => !priorRunIds.has(r.id));
     }
     if (!run) {
       setStatus('error', 'Triggered, but could not confirm the run started.', 'Try again in a moment.');
@@ -979,16 +987,27 @@ async function runScan(){
 
     if (run.conclusion === 'success'){
       setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfViewLink">View PDF</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
-      fetchLatestScanFresh(dispatchTime)
-        .then(scan => {
-          if (!scan) return; // gave up after retries — raw.githubusercontent.com hadn't caught up; Coverage Map tab will have it
-          const link = document.getElementById('pdfLink');
-          if (link) link.onclick = (e) => { e.preventDefault(); downloadScanPDF(scan); };
-          const viewLink = document.getElementById('pdfViewLink');
-          if (viewLink) viewLink.onclick = (e) => { e.preventDefault(); viewScanPDF(scan); };
-          renderResultsMiniMap(scan);
-        })
-        .catch(()=>{});
+      // The PDF links used to only get a click handler wired up if
+      // fetchLatestScanFresh succeeded within its ~15s retry budget —
+      // raw.githubusercontent.com propagation is often slower than that,
+      // so the links silently stayed dead with zero indication anything
+      // was wrong. Wire them up immediately instead: fetch (or re-fetch)
+      // the scan data AT CLICK TIME, so they always do something, even if
+      // that something is "still waiting, try again in a moment".
+      let freshScanPromise = fetchLatestScanFresh(run.created_at);
+      const withFreshScan = async (action) => {
+        const scan = await freshScanPromise.catch(() => null);
+        if (scan){ action(scan); return; }
+        freshScanPromise = fetchLatestScanFresh(run.created_at); // one more attempt, in case the first was too early
+        const retried = await freshScanPromise.catch(() => null);
+        if (retried){ action(retried); return; }
+        alert("This scan's report hasn't finished propagating yet — GitHub's raw content can lag a few seconds behind. Wait a moment and try again, or check the Coverage Map tab.");
+      };
+      const link = document.getElementById('pdfLink');
+      if (link) link.onclick = (e) => { e.preventDefault(); withFreshScan(downloadScanPDF); };
+      const viewLink = document.getElementById('pdfViewLink');
+      if (viewLink) viewLink.onclick = (e) => { e.preventDefault(); withFreshScan(viewScanPDF); };
+      freshScanPromise.then(scan => { if (scan) renderResultsMiniMap(scan); }).catch(()=>{});
     } else {
       setStatus('error', `❌ Scan ${run.conclusion}`, 'Something went wrong during the scan.');
     }

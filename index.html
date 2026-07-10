@@ -71,6 +71,14 @@ a{color:inherit;}
 
 #coverage-map,#detail-map,#scan-map{width:100%;height:280px;border-radius:8px;overflow:hidden;}
 .leaflet-container{background:#0a1420;}
+/* PowerFix lightning bolt in place of the default grab-hand cursor while
+   picking a street — the hotspot (11 27) lands on the bolt's tip so the
+   click point matches where it visually "strikes". */
+#scan-map.street-cursor,
+#scan-map.street-cursor .leaflet-interactive,
+#scan-map.street-cursor .leaflet-container{
+  cursor: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMCIgaGVpZ2h0PSIzMCIgdmlld0JveD0iMCAwIDMwIDMwIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMTAwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNGMEEwMzAiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjRkYzQjNCIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cGF0aCBkPSJNMTcgMSBMNiAxNyBMMTMgMTcgTDExIDI5IEwyNSAxMSBMMTcgMTEgWiIgZmlsbD0idXJsKCNnKSIgc3Ryb2tlPSIjMEQwRDBEIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K') 11 27, crosshair;
+}
 .leaflet-control-attribution{display:none;}
 .leaflet-popup-content-wrapper{background:var(--panel);border:1px solid var(--border);border-radius:6px;color:#fff;box-shadow:none;}
 .leaflet-popup-tip{background:var(--panel);}
@@ -312,6 +320,7 @@ function setScanMode(mode){
   document.getElementById('mode-street').classList.toggle('active', mode==='street');
   document.getElementById('radiusFields').style.display = mode==='radius' ? 'block' : 'none';
   document.getElementById('streetFields').style.display = mode==='street' ? 'block' : 'none';
+  document.getElementById('scan-map').classList.toggle('street-cursor', mode==='street');
 
   if (mode === 'street'){
     scanMarker.setOpacity(0);

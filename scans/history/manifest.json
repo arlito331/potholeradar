@@ -533,5 +533,48 @@
     "points_scanned": 45,
     "potholes_found": 0,
     "candidates_found": 25
+  },
+  {
+    "scan_id": "PR-20260710-124601",
+    "mode": "street",
+    "country": "Panama",
+    "city": "Avenida Italia",
+    "center_lat": 8.97423,
+    "center_lng": -79.5134358,
+    "radius_km": null,
+    "path": [
+      [
+        8.973791604457832,
+        -79.51394677162172
+      ],
+      [
+        8.9738224,
+        -79.513976
+      ],
+      [
+        8.9740609,
+        -79.513616
+      ],
+      [
+        8.97423,
+        -79.5134358
+      ],
+      [
+        8.974401,
+        -79.5132735
+      ],
+      [
+        8.9746156,
+        -79.5131046
+      ],
+      [
+        8.97457581956458,
+        -79.51308310031892
+      ]
+    ],
+    "scan_time": "2026-07-10T12:46:01Z",
+    "points_scanned": 10,
+    "potholes_found": 0,
+    "candidates_found": 2
   }
 ]

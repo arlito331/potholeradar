@@ -576,5 +576,36 @@
     "points_scanned": 10,
     "potholes_found": 0,
     "candidates_found": 2
+  },
+  {
+    "scan_id": "PR-20260710-164407",
+    "mode": "street",
+    "country": "Panama",
+    "city": "Calle Juan Ramon Poll C.",
+    "center_lat": 8.9880638,
+    "center_lng": -79.5203493,
+    "radius_km": null,
+    "path": [
+      [
+        8.986728287578389,
+        -79.51955795288087
+      ],
+      [
+        8.986634,
+        -79.5194665
+      ],
+      [
+        8.9880638,
+        -79.5203493
+      ],
+      [
+        8.988052927002515,
+        -79.52035188674927
+      ]
+    ],
+    "scan_time": "2026-07-10T16:44:07Z",
+    "points_scanned": 7,
+    "potholes_found": 0,
+    "candidates_found": 4
   }
 ]

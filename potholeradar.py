@@ -439,6 +439,18 @@ smudge far in the background that you're guessing might be a hole. If
 something is too far away or too small in frame to be sure, don't
 confirm it, and don't let it inflate confidence_visual either.
 
+Frame position honesty: keep looking at edges and corners, not just the
+obvious center of frame — real damage does show up there. But if what
+you're pointing to is a small chip or nick right at the frame's edge or
+corner, partially cut off by the image boundary, your description and
+location_in_frame must say so plainly (use "edge-cutoff" below), not
+round it up into "center-lane" or "foreground." A marginal, partially-
+visible chip at the frame boundary is a much weaker basis for
+pothole_confirmed than the same-looking damage seen fully and clearly —
+when what you can actually see is that small and that cut off, prefer
+crack_only or a lower confidence over a confident asphalt_pothole
+confirmation, even if the visible sliver looks consistent with one.
+
 Respond ONLY in this JSON format. Fill feature_type first, before
 pothole_confirmed — commit to step 1's classification before you let
 yourself reason about severity in step 2:
@@ -453,7 +465,7 @@ yourself reason about severity in step 2:
   "description": "Detailed 2-3 sentence description: where in frame, road surface condition, type of damage.",
   "estimated_diameter_m": 0.0,
   "estimated_depth_cm": 0,
-  "location_in_frame": "center-lane/right-lane/left-lane/shoulder/multiple",
+  "location_in_frame": "center-lane/right-lane/left-lane/shoulder/multiple/edge-cutoff",
   "road_condition": "Brief overall road condition assessment",
   "accident_risk": "low/medium/high/critical",
   "powerfix_opportunity": true/false,
@@ -486,7 +498,15 @@ yourself reason about severity in step 2:
             # Code-level gate, not just trusting the model's own pothole_confirmed:
             # a categorical mismatch (e.g. drainage_infrastructure typed but
             # pothole_confirmed left true anyway) must never slip through.
-            confirmed = result.get("pothole_confirmed", False) and result.get("feature_type") == "asphalt_pothole"
+            # Same for a marginal chip at the frame edge getting written up as
+            # a confident "center-lane" pothole — location_in_frame is the
+            # model's own admission that what it saw was partial/cut off, so
+            # it can't also be confirmed.
+            confirmed = (
+                result.get("pothole_confirmed", False)
+                and result.get("feature_type") == "asphalt_pothole"
+                and result.get("location_in_frame") != "edge-cutoff"
+            )
             return images[best_idx]["b64"], result, confirmed
     except Exception as e:
         print(f"   Vision analysis failed: {e}")

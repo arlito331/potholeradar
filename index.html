@@ -494,7 +494,7 @@ function snapClickToRoad(latlng){
   if (!best || bestDist > STREET_SNAP_PX) return null;
   const a = best.way.coords[best.i], b = best.way.coords[best.i + 1];
   const da = latlng.distanceTo(L.latLng(a)), db = latlng.distanceTo(L.latLng(b));
-  return { vertex: da <= db ? a : b, clickLatLng: [latlng.lat, latlng.lng] };
+  return { vertex: da <= db ? a : b, clickLatLng: [latlng.lat, latlng.lng], wayName: best.way.name };
 }
 
 // Plain Dijkstra over the road graph — viewport-sized graphs (low thousands
@@ -563,8 +563,17 @@ function handleStreetClick(latlng){
   }
 
   // Second click — find the road path connecting it back to the start.
-  const graph = buildRoadGraph(streetsInView);
-  const result = findRoutePath(graph, routeStart.vertex, snapped.vertex);
+  // Try staying on the SAME named street as the start point first: pure
+  // shortest-path over the whole network can silently detour onto a
+  // shorter, differently-named road even when both clicks were clearly
+  // meant to stay on one street (e.g. Heliodoro Patino curving around,
+  // with Av. Italia offering a shorter cut across). Only fall back to
+  // routing across the full road network — crossing intersections onto a
+  // different street — when the same-street attempt can't connect the
+  // two points at all.
+  const sameNameWays = streetsInView.filter(w => w.name === routeStart.wayName);
+  let result = findRoutePath(buildRoadGraph(sameNameWays), routeStart.vertex, snapped.vertex);
+  if (!result) result = findRoutePath(buildRoadGraph(streetsInView), routeStart.vertex, snapped.vertex);
   if (!result || result.path.length < 2){
     document.getElementById('streetSelection').innerHTML =
       "Those two points aren't on a connected stretch of road — click a second point further along the same road, or start over.";
@@ -595,13 +604,27 @@ function updateStreetSelectionText(){
     return;
   }
   if (routeStart && !routeEnd){
-    el.textContent = 'Start point set — click a second point to select the road between them.';
+    // Naming the snapped street immediately (not just after the 2nd click)
+    // matters most right where two roads cross or run close together — if
+    // the click snapped to the wrong one, that's visible now, before a
+    // second click gets wasted confirming a route on the wrong street.
+    // cancelRouteStart gives an explicit way out instead of forcing
+    // another click to be interpreted as the route's end point.
+    el.innerHTML = `Start point set on <strong>${routeStart.wayName}</strong> — click a second point to select the road between them. ` +
+      `<a href="#" onclick="cancelRouteStart();return false;">Wrong street? Cancel and pick again</a>`;
     return;
   }
   if (selectedRoute){
     el.innerHTML = `Selected: <strong>${selectedRoute.names.join(' → ')}</strong> (~${pathLengthM(selectedRoute.path)}m) · click two new points to change it`;
   }
 }
+
+function cancelRouteStart(){
+  routeStart = null;
+  redrawRouteOverlay();
+  updateStreetSelectionText();
+}
+window.cancelRouteStart = cancelRouteStart;
 
 function updateSearchHint(){
   const hint = document.getElementById('searchHint');

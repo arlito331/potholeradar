@@ -1,6 +1,15 @@
 name: PotholeRadar Detection Regression Test
 on:
   workflow_dispatch:
+    inputs:
+      script:
+        description: 'Which test script to run'
+        required: true
+        type: choice
+        options:
+          - regression_test.py
+          - screening_test.py
+        default: regression_test.py
 
 jobs:
   regression:
@@ -11,11 +20,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - name: Run regression test
+      - name: Run test script
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
           GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
-        run: python regression_test.py
+        run: python "${{ inputs.script }}"

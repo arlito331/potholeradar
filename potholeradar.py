@@ -16,6 +16,7 @@ import json
 import math
 import time
 import base64
+import hashlib
 import argparse
 from datetime import datetime, timezone
 
@@ -346,7 +347,13 @@ Do this in two explicit steps, in order — do not skip straight to
 judging severity:
 
 STEP 1 — CLASSIFY what kind of feature is actually present. Pick exactly
-one, honestly, before you think about how bad it looks:
+one, honestly, before you think about how bad it looks. Base this
+classification on whichever images are actually legible — a blurry or
+artifacted image (see unclear_artifact below) means you ignore THAT
+IMAGE, not that you default the whole point to unclear_artifact. If
+even one of the {len(images)} images clearly shows the road surface,
+classify off that image, even if other images (especially the
+near-nadir "Down" shot) are unreadable.
 - asphalt_pothole: a hole/depression in the road's asphalt itself, where
   paving material is physically missing, with jagged irregular edges
   and exposed base layer. This is the ONLY category that can go on to
@@ -367,10 +374,14 @@ one, honestly, before you think about how bad it looks:
 - water_no_visible_hole: standing water/puddle where you cannot see any
   edge, depth, or exposed base material — just can't tell if there's
   damage underneath.
-- unclear_artifact: a flat, blurry, textureless gray/brown smear with no
-  discernible pavement texture — the known Street View near-nadir
-  stitching artifact, not real information. Disregard that specific
-  image and classify off the other angles instead.
+- unclear_artifact: use this ONLY if EVERY street-level image (not
+  counting the satellite frame) is a flat, blurry, textureless
+  gray/brown smear with no discernible pavement texture — the known
+  Street View near-nadir stitching artifact. If even one street-level
+  angle shows real, legible pavement, classify off THAT image instead —
+  do not choose unclear_artifact just because the "Down" shot alone is
+  bad. This category means "no usable image exists here," not "one of
+  the images was bad."
 - other_no_damage: anything else with no road-surface damage (paint,
   shadows, vehicles, vegetation, etc).
 
@@ -428,6 +439,18 @@ smudge far in the background that you're guessing might be a hole. If
 something is too far away or too small in frame to be sure, don't
 confirm it, and don't let it inflate confidence_visual either.
 
+Frame position honesty: keep looking at edges and corners, not just the
+obvious center of frame — real damage does show up there. But if what
+you're pointing to is a small chip or nick right at the frame's edge or
+corner, partially cut off by the image boundary, your description and
+location_in_frame must say so plainly (use "edge-cutoff" below), not
+round it up into "center-lane" or "foreground." A marginal, partially-
+visible chip at the frame boundary is a much weaker basis for
+pothole_confirmed than the same-looking damage seen fully and clearly —
+when what you can actually see is that small and that cut off, prefer
+crack_only or a lower confidence over a confident asphalt_pothole
+confirmation, even if the visible sliver looks consistent with one.
+
 Respond ONLY in this JSON format. Fill feature_type first, before
 pothole_confirmed — commit to step 1's classification before you let
 yourself reason about severity in step 2:
@@ -442,7 +465,7 @@ yourself reason about severity in step 2:
   "description": "Detailed 2-3 sentence description: where in frame, road surface condition, type of damage.",
   "estimated_diameter_m": 0.0,
   "estimated_depth_cm": 0,
-  "location_in_frame": "center-lane/right-lane/left-lane/shoulder/multiple",
+  "location_in_frame": "center-lane/right-lane/left-lane/shoulder/multiple/edge-cutoff",
   "road_condition": "Brief overall road condition assessment",
   "accident_risk": "low/medium/high/critical",
   "powerfix_opportunity": true/false,
@@ -462,15 +485,125 @@ yourself reason about severity in step 2:
         if match:
             result = json.loads(match.group())
             best_idx = min(result.get("best_image_index", 0), len(images) - 1)
+            # The model sometimes points best_image_index at the satellite
+            # frame, which is only meant to be supporting context (per the
+            # prompt) — a shadow-heavy top-down shot then becomes the sole
+            # image ever attached to the finding/candidate, making it
+            # unreviewable. Fall back to the closest street-level image
+            # instead whenever that happens.
+            if images[best_idx].get("kind") == "satellite":
+                street_idx = next((i for i, im in enumerate(images) if im.get("kind") != "satellite"), None)
+                if street_idx is not None:
+                    best_idx = street_idx
             # Code-level gate, not just trusting the model's own pothole_confirmed:
             # a categorical mismatch (e.g. drainage_infrastructure typed but
             # pothole_confirmed left true anyway) must never slip through.
-            confirmed = result.get("pothole_confirmed", False) and result.get("feature_type") == "asphalt_pothole"
+            # Same for a marginal chip at the frame edge getting written up as
+            # a confident "center-lane" pothole — location_in_frame is the
+            # model's own admission that what it saw was partial/cut off, so
+            # it can't also be confirmed.
+            confirmed = (
+                result.get("pothole_confirmed", False)
+                and result.get("feature_type") == "asphalt_pothole"
+                and result.get("location_in_frame") != "edge-cutoff"
+            )
             return images[best_idx]["b64"], result, confirmed
     except Exception as e:
         print(f"   Vision analysis failed: {e}")
 
     return images[0]["b64"] if images else None, {}, False
+
+
+def screen_image_for_damage(image, lat, lng, cache=None):
+    """
+    Cheap first-pass screen: does THIS ONE image show visible road-surface
+    damage? Judged alone, with a minimal yes/no schema, so a bad frame
+    can never contaminate the verdict on a different, legible image the
+    way bundling everything into one multi-image call does — and so
+    there's almost no schema surface area for the model to invent plausible
+    detail on a photo that shows nothing.
+
+    `cache` (optional dict keyed by image hash) lets one scan run judge
+    each unique Street View panorama exactly once, even when several
+    nearby grid points snap to the same photo — this is what stops the
+    same image from getting reheard, and re-hallucinated, on repeat.
+    """
+    key = hashlib.sha256(image["b64"].encode()).hexdigest()
+    if cache is not None and key in cache:
+        return cache[key]
+
+    result = {"damage_visible": False, "note": ""}
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=200,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": (
+                    f"Look ONLY at this one photo (Street View, facing "
+                    f"{image.get('label','?')}, near {lat:.5f}, {lng:.5f}). "
+                    "Does it show visible road-surface damage — a hole, "
+                    "crack, patch, or missing asphalt — that you can "
+                    "actually point to in THIS specific frame? Don't infer "
+                    "from what a similar street 'probably' looks like, and "
+                    "don't guess based on a caption or label. If the frame "
+                    "is a blurry, textureless near-nadir stitching artifact "
+                    "with no real pavement visible, that's "
+                    "damage_visible: false, not true — 'unclear' is not "
+                    "'yes'.\n\n"
+                    "Respond ONLY in this JSON format:\n"
+                    '{"damage_visible": true/false, "note": "one sentence, '
+                    "only if damage_visible is true, describing exactly "
+                    'what you see and where in frame"}'
+                )},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image["b64"]}},
+            ]}],
+        )
+        text = response.content[0].text.strip()
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+    except Exception as e:
+        print(f"   Screening failed: {e}")
+
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def identify_pothole_in_images_screened(images, lat, lng, cache=None):
+    """
+    Parallel path to identify_pothole_in_images(): screens each
+    street-level image individually first, then only runs the full
+    classify-and-confirm pass (with the detailed JSON schema) on whichever
+    images actually screened positive — instead of handing the model all
+    ~9-10 images at once and forcing one combined verdict across the whole
+    bundle, which is what let 'unclear_artifact' swallow points that had
+    legible damage in other angles, and let the model fabricate a
+    'confirmed' pothole for a photo that showed none.
+
+    Also cheaper on boring points: if nothing screens positive, this skips
+    the expensive multi-image classify call entirely.
+    """
+    if not images:
+        return None, {}, False
+
+    street_images = [im for im in images if im.get("kind") != "satellite"]
+    satellite_images = [im for im in images if im.get("kind") == "satellite"]
+
+    screened = [(im, screen_image_for_damage(im, lat, lng, cache)) for im in street_images]
+    hits = [im for im, r in screened if r.get("damage_visible")]
+
+    if not hits:
+        fallback = street_images[0]["b64"] if street_images else (images[0]["b64"] if images else None)
+        return fallback, {
+            "feature_type": "other_no_damage",
+            "pothole_confirmed": False,
+            "confidence_visual": 0,
+            "description": "No individual image screened positive for visible road-surface damage.",
+        }, False
+
+    return identify_pothole_in_images(hits + satellite_images, lat, lng)
 
 
 # ============================================================

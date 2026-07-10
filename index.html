@@ -30,6 +30,8 @@ a{color:inherit;}
 .gear-btn:hover{opacity:1;}
 .gear-dot{position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:var(--red);}
 .gear-dot.ok{background:#4ADE80;}
+.gear-dot.optional{background:var(--dim);} /* unset-but-not-required, unlike the GitHub token dot */
+.gear-dot.optional.ok{background:#4ADE80;}
 .btn{background:var(--accent);color:#fff;border:none;border-radius:5px;padding:8px 16px;font-size:11px;font-weight:700;letter-spacing:0.5px;cursor:pointer;}
 .btn:hover{background:#3369c4;}
 .btn.secondary{background:transparent;border:1px solid var(--border);color:var(--muted);}
@@ -111,6 +113,9 @@ a{color:inherit;}
     <div class="header-title">Area Scanner</div>
     <div class="header-sub">Search a place → adjust radius → boom</div>
   </div>
+  <button class="gear-btn" id="placesGear" onclick="promptForPlacesKey()" title="Google Places API key settings">
+    <span class="gear-dot optional" id="placesGearDot"></span>📍
+  </button>
   <button class="gear-btn" id="tokenGear" onclick="promptForToken()" title="GitHub token settings">
     <span class="gear-dot" id="tokenGearDot"></span>⚙️
   </button>
@@ -154,7 +159,7 @@ a{color:inherit;}
     <div id="scan-map" style="margin:10px 0;"></div>
 
     <div id="streetFields" style="display:none;">
-      <div class="street-selection" id="streetSelection">No street selected — zoom in until roads appear, then click anywhere near one (you don't need to hit the line exactly).</div>
+      <div class="street-selection" id="streetSelection">Zoom in until roads appear, then click a point on a road to start, and a second point to select the road between them.</div>
     </div>
 
     <div id="radiusFields">
@@ -221,6 +226,7 @@ a{color:inherit;}
   <div id="detailSection" style="display:none;">
     <div style="display:flex;gap:10px;margin-bottom:14px;">
       <button class="btn secondary" onclick="backToOverview()">← Back to overview</button>
+      <button class="btn secondary" onclick="viewScanPDF(currentDetailScan)">👁 View PDF Report</button>
       <button class="btn" onclick="downloadScanPDF(currentDetailScan)">📄 Download PDF Report</button>
     </div>
     <div class="card" style="padding:0;overflow:hidden;">
@@ -273,15 +279,22 @@ function initScanMap(){
 }
 
 // ═══════════════════════════ SCAN MODE (radius vs street) ═══════════════════════════
-// Street selection is two-step: click near a road to select the whole thing (yellow),
-// then click near two points along it to narrow the highlighted range to exactly the
-// stretch you mean — the sub-range (not the whole OSM way) is what gets scanned.
-// Clicks snap to the NEAREST road within a pixel tolerance rather than requiring a
-// pixel-perfect hit on the thin rendered line — hitting a thin line exactly proved
-// too fiddly with a mouse, let alone a finger on mobile.
+// Street selection is exactly two clicks, like drawing a path in Google
+// Earth: click a start point on any road, click an end point on any road,
+// and the actual road network between them is found automatically
+// (buildRoadGraph + Dijkstra in findRoutePath) and highlighted — including
+// across intersections and street-name changes, not just within one OSM
+// way or one named street. A third click starts a fresh selection from
+// that point. Only real vehicle roads are loaded/rendered at all (see
+// DRIVABLE_HIGHWAY below) — footways, cycleways, and steps are filtered
+// out at the query level since a pothole is a car-lane thing. Clicks snap
+// to the NEAREST road within a pixel tolerance rather than requiring a
+// pixel-perfect hit on the thin rendered line — hitting a thin line
+// exactly proved too fiddly with a mouse, let alone a finger on mobile.
 
 const STREET_SNAP_PX = 30; // click tolerance in screen pixels, independent of zoom level
-let scanMode = 'radius', streetLayerGroup = null, selectedStreet = null, trimPoints = [], trimOverlay = null, streetsInView = [];
+let scanMode = 'radius', streetLayerGroup = null, streetsInView = [];
+let routeStart = null, routeEnd = null, selectedRoute = null, routeOverlay = null;
 
 function setScanMode(mode){
   scanMode = mode;
@@ -302,6 +315,7 @@ function setScanMode(mode){
     scanMarker.setOpacity(1);
     scanCircle.setStyle({opacity:1, fillOpacity:0.12});
     streetLayerGroup.clearLayers();
+    routeStart = null; routeEnd = null; selectedRoute = null; routeOverlay = null;
   }
 }
 window.setScanMode = setScanMode;
@@ -310,44 +324,107 @@ window.loadStreetsInView = loadStreetsInView;
 async function loadStreetsInView(){
   if (!scanMap) return;
   if (scanMap.getZoom() < 15){
-    document.getElementById('streetSelection').textContent = selectedStreet
-      ? `Selected: ${selectedStreet.name} (${selectedStreet.path.length} pts)` : 'Zoom in further to load streets…';
+    document.getElementById('streetSelection').textContent = selectedRoute
+      ? `Selected: ${selectedRoute.names.join(' → ')}` : 'Zoom in further to load streets…';
     return;
   }
-  document.getElementById('streetSelection').textContent = selectedStreet
-    ? `Selected: ${selectedStreet.name} (${selectedStreet.path.length} pts)` : 'Loading streets…';
+  document.getElementById('streetSelection').textContent = selectedRoute
+    ? `Selected: ${selectedRoute.names.join(' → ')}` : 'Loading streets…';
   const b = scanMap.getBounds();
   const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
-  // No ["name"] filter — plenty of real residential streets/alleys are unnamed in
-  // OSM and were previously invisible/unselectable entirely; they render as
+  // Only real vehicle roads — a pothole is a car-lane thing, so footways,
+  // cycleways, steps, and pedestrian paths only added clutter and false
+  // click targets. No ["name"] filter beyond that — plenty of real
+  // residential streets/alleys are unnamed in OSM; they render as
   // "Unnamed road" instead of being silently excluded.
-  const query = `[out:json][timeout:25];way["highway"](${bbox});out geom;`;
+  const DRIVABLE_HIGHWAY = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link';
+  const query = `[out:json][timeout:25];way["highway"~"^(${DRIVABLE_HIGHWAY})$"](${bbox});out geom;`;
   try {
     const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: query });
     const data = await res.json();
-    streetsInView = (data.elements||[])
+    const rawWays = (data.elements||[])
       .filter(w => w.geometry && w.geometry.length > 1)
       .map(w => ({ id: w.id, name: (w.tags && w.tags.name) || 'Unnamed road', coords: w.geometry.map(g => [g.lat, g.lon]) }));
+    // OSM splits one real street into a separate "way" at every intersection,
+    // so picking a single way used to select just one block — merge same-named
+    // ways whose endpoints connect into one continuous, fully-selectable street.
+    streetsInView = mergeStreetWays(rawWays);
 
     streetLayerGroup.clearLayers();
+    // A selected route is drawn as its own overlay (redrawRouteOverlay), so
+    // every loaded road just renders in the same neutral style here — the
+    // selection no longer belongs to any single one of these entities.
     streetsInView.forEach(street => {
-      const isSelected = selectedStreet && selectedStreet.id === street.id;
       L.polyline(street.coords, {
-        color: isSelected ? '#FFD400' : '#3F7FE0',
-        weight: isSelected ? 6 : 4,
-        opacity: isSelected ? 0.75 : 0.45,
+        color: '#3F7FE0', weight: 4, opacity: 0.55,
         interactive: false, // hit-testing is centralized in handleStreetClick, not per-line — lets clicks near (not just on) a road register
       }).addTo(streetLayerGroup);
     });
-    redrawTrimOverlay();
+    redrawRouteOverlay();
     if (!streetsInView.length){
       document.getElementById('streetSelection').innerHTML = 'No roads found in this view. <a href="#" onclick="loadStreetsInView();return false;">Retry</a> or pan/zoom and try again.';
-    } else if (!selectedStreet){
+    } else if (!selectedRoute){
       updateStreetSelectionText();
     }
   } catch (e){
     document.getElementById('streetSelection').innerHTML = 'Could not load streets (the map data server may be busy). <a href="#" onclick="loadStreetsInView();return false;">Retry</a>';
   }
+}
+
+// Stitches OSM way fragments that share the same street name into the
+// longest continuous path(s) possible, by chaining segments whose
+// endpoints coincide (shared intersection nodes have identical
+// coordinates in OSM, so an exact-match key is enough). "Unnamed road"
+// segments are left as-is — merging unrelated unnamed fragments by
+// proximity alone is too likely to stitch together two different alleys.
+function mergeStreetWays(rawWays){
+  const coordKey = c => c[0].toFixed(6) + ',' + c[1].toFixed(6);
+  const byName = new Map();
+  const unnamed = [];
+  rawWays.forEach(w => {
+    if (w.name === 'Unnamed road'){ unnamed.push(w); return; }
+    if (!byName.has(w.name)) byName.set(w.name, []);
+    byName.get(w.name).push(w.coords.slice());
+  });
+
+  const merged = [];
+  let nextId = 0;
+
+  byName.forEach((segments, name) => {
+    const chains = [];
+    let remaining = segments.slice();
+    while (remaining.length){
+      let chain = remaining.shift();
+      let extended = true;
+      while (extended){
+        extended = false;
+        for (let i = 0; i < remaining.length; i++){
+          const seg = remaining[i];
+          const chainStart = chain[0], chainEnd = chain[chain.length - 1];
+          const segStart = seg[0], segEnd = seg[seg.length - 1];
+          if (coordKey(chainEnd) === coordKey(segStart)){
+            chain = chain.concat(seg.slice(1));
+          } else if (coordKey(chainEnd) === coordKey(segEnd)){
+            chain = chain.concat(seg.slice(0, -1).reverse());
+          } else if (coordKey(chainStart) === coordKey(segEnd)){
+            chain = seg.slice(0, -1).concat(chain);
+          } else if (coordKey(chainStart) === coordKey(segStart)){
+            chain = seg.slice(1).reverse().concat(chain);
+          } else {
+            continue;
+          }
+          remaining.splice(i, 1);
+          extended = true;
+          break;
+        }
+      }
+      chains.push(chain);
+    }
+    chains.forEach(coords => merged.push({ id: `merged-${nextId++}`, name, coords }));
+  });
+
+  unnamed.forEach(w => merged.push({ id: `way-${w.id}`, name: w.name, coords: w.coords }));
+  return merged;
 }
 
 function pointToSegmentDistPx(p, a, b){
@@ -359,94 +436,162 @@ function pointToSegmentDistPx(p, a, b){
   return Math.hypot(p.x - (a.x + t*dx), p.y - (a.y + t*dy));
 }
 
-function handleStreetClick(latlng){
-  const clickPx = scanMap.latLngToContainerPoint(latlng);
-  let best = null, bestDist = Infinity;
-  streetsInView.forEach(street => {
-    for (let i = 0; i < street.coords.length - 1; i++){
-      const a = scanMap.latLngToContainerPoint(street.coords[i]);
-      const b = scanMap.latLngToContainerPoint(street.coords[i+1]);
-      const d = pointToSegmentDistPx(clickPx, a, b);
-      if (d < bestDist) { bestDist = d; best = street; }
+function coordKey(c){ return c[0].toFixed(6) + ',' + c[1].toFixed(6); }
+
+function pathLengthM(path){
+  let m = 0;
+  for (let i = 1; i < path.length; i++) m += L.latLng(path[i-1]).distanceTo(L.latLng(path[i]));
+  return Math.round(m);
+}
+
+// One node per distinct coordinate across every loaded way; an edge between
+// each consecutive pair of points within a way. Shared intersection nodes
+// (identical coordinates across two different ways) are what let a route
+// cross from one street onto another, exactly like real road navigation.
+function buildRoadGraph(ways){
+  const nodes = new Map();
+  function ensureNode(c){
+    const k = coordKey(c);
+    if (!nodes.has(k)) nodes.set(k, { latlng: c, edges: [] });
+    return k;
+  }
+  ways.forEach(w => {
+    for (let i = 0; i < w.coords.length - 1; i++){
+      const a = w.coords[i], b = w.coords[i+1];
+      const ka = ensureNode(a), kb = ensureNode(b);
+      const dist = L.latLng(a).distanceTo(L.latLng(b));
+      nodes.get(ka).edges.push({ key: kb, dist, wayName: w.name });
+      nodes.get(kb).edges.push({ key: ka, dist, wayName: w.name });
     }
   });
+  return nodes;
+}
 
-  if (!best || bestDist > STREET_SNAP_PX){
+// Finds the road segment nearest a click (within STREET_SNAP_PX), and
+// returns both the precise clicked point (for a visually exact endpoint)
+// and the nearer of that segment's two graph vertices (for routing).
+function snapClickToRoad(latlng){
+  const clickPx = scanMap.latLngToContainerPoint(latlng);
+  let best = null, bestDist = Infinity;
+  streetsInView.forEach(way => {
+    for (let i = 0; i < way.coords.length - 1; i++){
+      const a = scanMap.latLngToContainerPoint(way.coords[i]);
+      const b = scanMap.latLngToContainerPoint(way.coords[i+1]);
+      const d = pointToSegmentDistPx(clickPx, a, b);
+      if (d < bestDist) { bestDist = d; best = { way, i }; }
+    }
+  });
+  if (!best || bestDist > STREET_SNAP_PX) return null;
+  const a = best.way.coords[best.i], b = best.way.coords[best.i + 1];
+  const da = latlng.distanceTo(L.latLng(a)), db = latlng.distanceTo(L.latLng(b));
+  return { vertex: da <= db ? a : b, clickLatLng: [latlng.lat, latlng.lng] };
+}
+
+// Plain Dijkstra over the road graph — viewport-sized graphs (low thousands
+// of nodes at most) make the O(V^2) node scan for the next-closest
+// unvisited node fast enough without a priority queue.
+function findRoutePath(graph, startVertex, endVertex){
+  const startKey = coordKey(startVertex), endKey = coordKey(endVertex);
+  if (!graph.has(startKey) || !graph.has(endKey)) return null;
+  if (startKey === endKey) return { path: [startVertex], names: [] };
+
+  const dist = new Map([[startKey, 0]]);
+  const prev = new Map();
+  const visited = new Set();
+
+  while (true){
+    let u = null, uDist = Infinity;
+    dist.forEach((d, k) => { if (!visited.has(k) && d < uDist) { uDist = d; u = k; } });
+    if (u === null || u === endKey) break;
+    visited.add(u);
+    graph.get(u).edges.forEach(e => {
+      if (visited.has(e.key)) return;
+      const nd = uDist + e.dist;
+      if (nd < (dist.get(e.key) ?? Infinity)) { dist.set(e.key, nd); prev.set(e.key, { key: u, wayName: e.wayName }); }
+    });
+  }
+  if (!dist.has(endKey)) return null; // no connected path between these two points
+
+  const path = [], names = [];
+  let cur = endKey;
+  while (cur !== startKey){
+    path.push(graph.get(cur).latlng);
+    const p = prev.get(cur);
+    if (!p) return null;
+    names.push(p.wayName);
+    cur = p.key;
+  }
+  path.push(graph.get(startKey).latlng);
+  path.reverse(); names.reverse();
+  return { path, names };
+}
+
+function namesInOrder(names){
+  const out = [];
+  names.forEach(n => { if (out[out.length - 1] !== n) out.push(n); });
+  return out;
+}
+
+function handleStreetClick(latlng){
+  const snapped = snapClickToRoad(latlng);
+  if (!snapped){
     const el = document.getElementById('streetSelection');
     el.textContent = 'No road within reach of that click — try clicking closer to a street line.';
-    setTimeout(() => {
-      if (selectedStreet) updateStreetSelectionText();
-      else el.textContent = "No street selected — zoom in until roads appear, then click anywhere near one (you don't need to hit the line exactly).";
-    }, 2200);
+    setTimeout(updateStreetSelectionText, 2200);
     return;
   }
 
-  if (selectedStreet && selectedStreet.id === best.id) {
-    addTrimPoint(latlng);
-  } else {
-    selectStreet({ id: best.id, tags: { name: best.name } }, best.coords);
+  if (!routeStart || (routeStart && routeEnd)){
+    // Fresh start: either the very first click, or a 3rd click after a
+    // route was already completed — either way, begin a new selection.
+    routeStart = snapped;
+    routeEnd = null;
+    selectedRoute = null;
+    redrawRouteOverlay();
+    updateStreetSelectionText();
+    return;
   }
-}
 
-function selectStreet(way, coords){
-  selectedStreet = { id: way.id, name: (way.tags && way.tags.name) || 'Unnamed road', fullPath: coords, path: coords };
-  trimPoints = [];
+  // Second click — find the road path connecting it back to the start.
+  const graph = buildRoadGraph(streetsInView);
+  const result = findRoutePath(graph, routeStart.vertex, snapped.vertex);
+  if (!result || result.path.length < 2){
+    document.getElementById('streetSelection').innerHTML =
+      "Those two points aren't on a connected stretch of road — click a second point further along the same road, or start over.";
+    return;
+  }
+  routeEnd = snapped;
+  selectedRoute = {
+    path: [routeStart.clickLatLng, ...result.path, routeEnd.clickLatLng],
+    names: namesInOrder(result.names),
+  };
+  redrawRouteOverlay();
   clearScanStatus();
-  loadStreetsInView();
   updateStreetSelectionText();
 }
 
-function nearestPathIndex(path, latlng){
-  let best = 0, bestD = Infinity;
-  path.forEach((c, i) => { const d = (c[0]-latlng.lat)**2 + (c[1]-latlng.lng)**2; if (d < bestD) { bestD = d; best = i; } });
-  return best;
-}
-
-function addTrimPoint(latlng){
-  const idx = nearestPathIndex(selectedStreet.fullPath, latlng);
-  trimPoints.push(idx);
-  if (trimPoints.length > 2) trimPoints = [idx]; // a 3rd click starts a fresh range
-  if (trimPoints.length === 2){
-    const [a, b] = [...trimPoints].sort((x, y) => x - y);
-    selectedStreet.path = selectedStreet.fullPath.slice(a, b + 1);
-  }
-  redrawTrimOverlay();
-  updateStreetSelectionText();
-}
-
-function redrawTrimOverlay(){
-  if (trimOverlay) { streetLayerGroup.removeLayer(trimOverlay); trimOverlay = null; }
-  if (!selectedStreet) return;
-  trimOverlay = L.layerGroup().addTo(streetLayerGroup);
-  trimPoints.forEach(idx => {
-    L.circleMarker(selectedStreet.fullPath[idx], {radius:6, color:'#fff', fillColor:'#FFD400', fillOpacity:1, weight:2}).addTo(trimOverlay);
-  });
-  if (selectedStreet.path.length !== selectedStreet.fullPath.length){
-    L.polyline(selectedStreet.path, {color:'#FFD400', weight:9, opacity:1}).addTo(trimOverlay);
-  }
+function redrawRouteOverlay(){
+  if (routeOverlay) { streetLayerGroup.removeLayer(routeOverlay); routeOverlay = null; }
+  routeOverlay = L.layerGroup().addTo(streetLayerGroup);
+  if (routeStart) L.circleMarker(routeStart.clickLatLng, {radius:6, color:'#fff', fillColor:'#FFD400', fillOpacity:1, weight:2}).addTo(routeOverlay);
+  if (routeEnd) L.circleMarker(routeEnd.clickLatLng, {radius:6, color:'#fff', fillColor:'#FFD400', fillOpacity:1, weight:2}).addTo(routeOverlay);
+  if (selectedRoute) L.polyline(selectedRoute.path, {color:'#FFD400', weight:7, opacity:1}).addTo(routeOverlay);
 }
 
 function updateStreetSelectionText(){
-  if (!selectedStreet){
-    document.getElementById('streetSelection').textContent = "No street selected — zoom in until roads appear, then click anywhere near one (you don't need to hit the line exactly).";
+  const el = document.getElementById('streetSelection');
+  if (!routeStart){
+    el.textContent = "Click a point on a road to start, then click a second point — the road between them is selected automatically.";
     return;
   }
-  const trimmed = selectedStreet.path.length !== selectedStreet.fullPath.length;
-  const status = trimmed
-    ? `narrowed to ${selectedStreet.path.length} of ${selectedStreet.fullPath.length} pts`
-    : `${selectedStreet.fullPath.length} pts — click near two points along the highlighted road to narrow the range`;
-  const resetLink = trimmed ? ` · <a href="#" onclick="resetStreetTrim();return false;">Use whole street</a>` : '';
-  document.getElementById('streetSelection').innerHTML = `Selected: <strong>${selectedStreet.name}</strong> (${status})${resetLink}`;
+  if (routeStart && !routeEnd){
+    el.textContent = 'Start point set — click a second point to select the road between them.';
+    return;
+  }
+  if (selectedRoute){
+    el.innerHTML = `Selected: <strong>${selectedRoute.names.join(' → ')}</strong> (~${pathLengthM(selectedRoute.path)}m) · click two new points to change it`;
+  }
 }
-
-function resetStreetTrim(){
-  if (!selectedStreet) return;
-  trimPoints = [];
-  selectedStreet.path = selectedStreet.fullPath;
-  redrawTrimOverlay();
-  updateStreetSelectionText();
-}
-window.resetStreetTrim = resetStreetTrim;
 
 function updateSearchHint(){
   const hint = document.getElementById('searchHint');
@@ -486,6 +631,17 @@ function clearSearchResults(){ document.getElementById('searchResults').innerHTM
 
 let lastSearchResults = [];
 
+// Any action that moves the "you are here" point to a brand new place needs
+// to drop whatever was selected at the OLD place too — otherwise a leftover
+// street-mode route, or a stale results mini-map from a previous scan,
+// stays on screen looking like it belongs to the new location.
+function resetSelectionForNewLocation(){
+  clearScanStatus();
+  routeStart = null; routeEnd = null; selectedRoute = null;
+  if (routeOverlay) { streetLayerGroup.removeLayer(routeOverlay); routeOverlay = null; }
+  if (scanMode === 'street') loadStreetsInView();
+}
+
 function applySearchResult(r){
   const latlng = [parseFloat(r.lat), parseFloat(r.lon)];
   scanMap.setView(latlng, 17);
@@ -494,7 +650,7 @@ function applySearchResult(r){
   lastSearchLabel = r.display_name.split(',').slice(0,3).join(',');
   updateSearchHint();
   clearSearchResults();
-  clearScanStatus();
+  resetSelectionForNewLocation();
 }
 window.applySearchResult = applySearchResult;
 
@@ -505,6 +661,35 @@ function renderSearchResults(results){
       <strong>${r.name || r.display_name.split(',')[0]}</strong><br/>
       <span style="color:var(--dim);">${r.display_name}</span>
     </div>`).join('');
+}
+
+// Google's Places index covers named businesses (a specific pharmacy
+// branch, a hotel, a store) far more completely than OpenStreetMap does in
+// most of Latin America — Nominatim is fine for streets/neighborhoods but
+// routinely has nothing for "Farmacias Arrocha" or similar chains. Used
+// only when the user has set an API key (see promptForPlacesKey); returns
+// results already normalized to the same {lat, lon, display_name, name}
+// shape Nominatim uses, so nothing downstream needs to know which source
+// answered.
+async function searchPlacesGoogle(query, country){
+  const key = getPlacesKey();
+  if (!key) return null;
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': key,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location',
+    },
+    body: JSON.stringify({ textQuery: `${query}, ${country}` }),
+  });
+  if (!res.ok) throw new Error(`Places API HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.places || []).map(p => ({
+    lat: p.location.latitude, lon: p.location.longitude,
+    name: p.displayName && p.displayName.text,
+    display_name: [p.displayName && p.displayName.text, p.formattedAddress].filter(Boolean).join(', '),
+  }));
 }
 
 async function searchPlace(){
@@ -522,18 +707,30 @@ async function searchPlace(){
     scanCircle.setLatLng([lat,lng]);
     lastSearchLabel = `Exact coordinates (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
     updateSearchHint();
-    clearScanStatus();
+    resetSelectionForNewLocation();
     return;
   }
 
   hint.textContent = 'Searching…';
+  let results = null, usedPlaces = false;
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', ' + country)}&format=json&limit=5`
-    );
-    const results = await res.json();
+    results = await searchPlacesGoogle(query, country);
+    usedPlaces = !!results;
+  } catch (e){
+    results = null; // Places call failed — fall through to OpenStreetMap below
+  }
+  try {
+    if (!results || !results.length){
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', ' + country)}&format=json&limit=5`
+      );
+      results = await res.json();
+      usedPlaces = false;
+    }
     if (!results.length){
-      hint.textContent = `No results for "${query}" — try a different search, or click the map directly.`;
+      hint.textContent = usedPlaces
+        ? `No results for "${query}" — try a different search, or click the map directly.`
+        : `No results for "${query}" — try a different search, click the map directly, or add a Google Places API key (📍 above) for better business/landmark search.`;
       return;
     }
     if (results.length === 1){
@@ -553,6 +750,8 @@ async function searchPlace(){
 
 function getGhToken(){ return localStorage.getItem('pr_gh_token'); }
 function setGhToken(t){ localStorage.setItem('pr_gh_token', t); }
+function getPlacesKey(){ return localStorage.getItem('pr_places_key'); }
+function setPlacesKey(k){ localStorage.setItem('pr_places_key', k); }
 
 function refreshTokenBar(){
   const dot = document.getElementById('tokenGearDot');
@@ -561,6 +760,30 @@ function refreshTokenBar(){
   dot.classList.toggle('ok', ok);
   gear.title = ok ? 'GitHub token saved — click to change' : 'GitHub token not set — click to add one (required to trigger scans)';
 }
+
+function refreshPlacesBar(){
+  const dot = document.getElementById('placesGearDot');
+  const gear = document.getElementById('placesGear');
+  const ok = !!getPlacesKey();
+  dot.classList.toggle('ok', ok);
+  gear.title = ok
+    ? 'Google Places API key saved — click to change (used for business/landmark search; falls back to OpenStreetMap search without it)'
+    : 'No Google Places API key — search falls back to OpenStreetMap, which often misses named businesses. Click to add a key.';
+}
+
+function promptForPlacesKey(){
+  const t = prompt(
+    'Paste a Google Places API key (Places API New, HTTP-referrer restricted to this site).\n' +
+    'Stored only in this browser (localStorage), never sent anywhere except places.googleapis.com.\n\n' +
+    'Optional — without one, place search falls back to OpenStreetMap, which is fine for streets/neighborhoods ' +
+    'but often misses named businesses like a specific pharmacy or hotel branch.\n\n' +
+    'Leave blank and press OK to remove a saved key.'
+  );
+  if (t === null) return;
+  if (t.trim()) setPlacesKey(t.trim()); else localStorage.removeItem('pr_places_key');
+  refreshPlacesBar();
+}
+window.promptForPlacesKey = promptForPlacesKey;
 
 function promptForToken(){
   const t = prompt('Paste a GitHub personal access token with "repo" + "workflow" scope.\nStored only in this browser (localStorage), never sent anywhere except api.github.com.');
@@ -642,15 +865,16 @@ async function runScan(){
 
   let inputs, label;
   if (scanMode === 'street'){
-    if (!selectedStreet) { alert('Click a street on the map to select it.'); return; }
-    const mid = selectedStreet.path[Math.floor(selectedStreet.path.length/2)];
+    if (!selectedRoute) { alert('Click two points on the map to select a stretch of road first.'); return; }
+    const mid = selectedRoute.path[Math.floor(selectedRoute.path.length/2)];
+    const routeLabel = selectedRoute.names.join(' → ');
     inputs = {
-      country, city: selectedStreet.name, radius_km: '0',
+      country, city: routeLabel, radius_km: '0',
       lat: String(mid[0]), lng: String(mid[1]),
       max_points: String(maxPoints),
-      street_path: JSON.stringify(selectedStreet.path),
+      street_path: JSON.stringify(selectedRoute.path),
     };
-    label = `${selectedStreet.name}, ${country} · street`;
+    label = `${routeLabel}, ${country} · street`;
   } else {
     const radiusKm = document.getElementById('fRadius').value;
     const latlng = scanMarker.getLatLng();
@@ -709,12 +933,14 @@ async function runScan(){
     }
 
     if (run.conclusion === 'success'){
-      setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
+      setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfViewLink">View PDF</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
       fetchLatestScanFresh(dispatchTime)
         .then(scan => {
           if (!scan) return; // gave up after retries — raw.githubusercontent.com hadn't caught up; Coverage Map tab will have it
           const link = document.getElementById('pdfLink');
           if (link) link.onclick = (e) => { e.preventDefault(); downloadScanPDF(scan); };
+          const viewLink = document.getElementById('pdfViewLink');
+          if (viewLink) viewLink.onclick = (e) => { e.preventDefault(); viewScanPDF(scan); };
           renderResultsMiniMap(scan);
         })
         .catch(()=>{});
@@ -776,7 +1002,7 @@ function scanAreaLabel(s){
 
 // ═══════════════════════════ PDF REPORT ═══════════════════════════
 
-function downloadScanPDF(scan){
+function buildScanPDF(scan){
   const { jsPDF } = window.jspdf;
   const W = 612, H = 792, M = 40; // US Letter, portrait
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: [W, H] });
@@ -875,9 +1101,18 @@ function downloadScanPDF(scan){
   text('POWERFIX · REPAIR. REINVENTED.', M, 8, ACCENT, 'bold');
   text('PotholeRadar v1.2 — proactive area sweep, no prior report required.', M, 8, DIM); y += 12;
 
-  doc.save(`PotholeRadar_${scan.scan_id}.pdf`);
+  return doc;
+}
+
+function downloadScanPDF(scan){
+  buildScanPDF(scan).save(`PotholeRadar_${scan.scan_id}.pdf`);
+}
+function viewScanPDF(scan){
+  const doc = buildScanPDF(scan);
+  window.open(doc.output('bloburl'), '_blank');
 }
 window.downloadScanPDF = downloadScanPDF;
+window.viewScanPDF = viewScanPDF;
 
 function renderCoverageMap(){
   const el = document.getElementById('coverage-map');
@@ -1019,6 +1254,7 @@ window.searchPlace = searchPlace;
 window.onRadiusInput = onRadiusInput;
 
 refreshTokenBar();
+refreshPlacesBar();
 initScanMap();
 onRadiusInput();
 </script>

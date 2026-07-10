@@ -307,5 +307,19 @@
     "points_scanned": 15,
     "potholes_found": 0,
     "candidates_found": 11
+  },
+  {
+    "scan_id": "PR-20260710-031456",
+    "mode": "radius",
+    "country": "Panama",
+    "city": "C. Heliodoro Patino (tight-spacing test)",
+    "center_lat": 8.974413,
+    "center_lng": -79.512802,
+    "radius_km": 0.015,
+    "path": null,
+    "scan_time": "2026-07-10T03:14:56Z",
+    "points_scanned": 29,
+    "potholes_found": 1,
+    "candidates_found": 6
   }
 ]

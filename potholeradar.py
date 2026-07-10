@@ -733,6 +733,10 @@ def main():
     errors = []
     points_scanned = 0
     points_skipped = 0
+    image_screen_cache = {}  # shared across the whole run: nearby grid points often
+                              # snap to the identical Street View panorama, and judging
+                              # the same photo more than once is exactly how a prior run
+                              # got three contradictory verdicts on one image
 
     for idx, (lat, lng) in enumerate(points):
         print(f"  [{idx+1}/{len(points)}] {lat:.5f}, {lng:.5f} ...", end=" ")
@@ -752,7 +756,8 @@ def main():
             if top_down:
                 images = images + [top_down]
 
-            best_b64, result, confirmed = identify_pothole_in_images(images, lat, lng)
+            best_b64, result, confirmed = identify_pothole_in_images_screened(
+                images, lat, lng, cache=image_screen_cache)
             points_scanned += 1
             low_confidence = confirmed and result.get("confidence_visual", 0) < MIN_CONFIDENCE
             if low_confidence:

@@ -246,7 +246,10 @@ a{color:inherit;}
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Vendored locally (vendor/jspdf.umd.min.js) instead of loaded from a CDN —
+     cdnjs.cloudflare.com is blocked on some networks/ad-blockers, which
+     silently broke every PDF button with no visible error. -->
+<script src="vendor/jspdf.umd.min.js"></script>
 <script>
 const REPO_OWNER = 'arlito331';
 const REPO_NAME  = 'potholeradar';
@@ -1147,11 +1150,22 @@ function buildScanPDF(scan){
 }
 
 function downloadScanPDF(scan){
-  buildScanPDF(scan).save(`PotholeRadar_${scan.scan_id}.pdf`);
+  if (!scan) { alert('No scan selected to build a report from.'); return; }
+  try {
+    buildScanPDF(scan).save(`PotholeRadar_${scan.scan_id}.pdf`);
+  } catch (e){
+    alert(`Couldn't generate the PDF: ${e.message}\n\n(This used to fail silently — now at least you know.)`);
+  }
 }
 function viewScanPDF(scan){
-  const doc = buildScanPDF(scan);
-  window.open(doc.output('bloburl'), '_blank');
+  if (!scan) { alert('No scan selected to build a report from.'); return; }
+  try {
+    const doc = buildScanPDF(scan);
+    const win = window.open(doc.output('bloburl'), '_blank');
+    if (!win) alert("The PDF opened, but your browser's popup blocker may have stopped the new tab — check for a blocked-popup notice near the address bar.");
+  } catch (e){
+    alert(`Couldn't generate the PDF: ${e.message}\n\n(This used to fail silently — now at least you know.)`);
+  }
 }
 window.downloadScanPDF = downloadScanPDF;
 window.viewScanPDF = viewScanPDF;

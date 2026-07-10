@@ -78,8 +78,22 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add scans/ || true
-          git diff --staged --quiet || git commit -m "scan: ${{ inputs.city }}, ${{ inputs.country }} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git push || true
+          git diff --staged --quiet && exit 0
+          git commit -m "scan: ${{ inputs.city }}, ${{ inputs.country }} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # main moves fast (this workflow runs concurrently, and manual
+          # pushes happen too) — a plain push silently lost a real scan
+          # report to a same-second race once already ("git push || true"
+          # swallowed the rejection with no error and no retry). Rebase
+          # onto whatever's new on main and retry a few times before
+          # actually giving up.
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; break; }
+            sleep $((i * 3))
+          done
+          echo "::error::Failed to push scan report after retries — the scan ran but its report was NOT saved."
+          exit 1
       - name: Purge jsDelivr cache
         run: |
           curl -s "https://purge.jsdelivr.net/gh/arlito331/potholeradar@main/scans/latest_scan.json" || true

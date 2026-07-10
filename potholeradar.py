@@ -508,10 +508,18 @@ yourself reason about severity in step 2:
                 and result.get("location_in_frame") != "edge-cutoff"
             )
             return images[best_idx]["b64"], result, confirmed
+        print("   Vision analysis returned no parseable JSON")
     except Exception as e:
         print(f"   Vision analysis failed: {e}")
+        return images[0]["b64"] if images else None, {"_api_error": str(e)}, False
 
-    return images[0]["b64"] if images else None, {}, False
+    # No exception, but no parseable result either — still a real failure,
+    # not "no damage found". Flagged the same way so main() doesn't quietly
+    # log it as a clean/candidate point (this previously showed up as
+    # "clear, but flagged as candidate (?)" with the run's error count
+    # still reporting 0 — e.g. a run that hit repeated Anthropic
+    # 'overloaded_error' responses looked, at a glance, like a clean scan).
+    return images[0]["b64"] if images else None, {"_api_error": "no parseable JSON in response"}, False
 
 
 def screen_image_for_damage(image, lat, lng, cache=None):
@@ -565,6 +573,9 @@ def screen_image_for_damage(image, lat, lng, cache=None):
             result = json.loads(match.group())
     except Exception as e:
         print(f"   Screening failed: {e}")
+        return {"damage_visible": False, "note": "", "_api_error": str(e)}  # not cached — a transient
+                                                                              # failure shouldn't permanently
+                                                                              # poison this image's verdict
 
     if cache is not None:
         cache[key] = result
@@ -593,9 +604,15 @@ def identify_pothole_in_images_screened(images, lat, lng, cache=None):
 
     screened = [(im, screen_image_for_damage(im, lat, lng, cache)) for im in street_images]
     hits = [im for im, r in screened if r.get("damage_visible")]
+    screen_errors = [r["_api_error"] for _, r in screened if r.get("_api_error")]
 
     if not hits:
         fallback = street_images[0]["b64"] if street_images else (images[0]["b64"] if images else None)
+        if screen_errors:
+            # At least one image was never actually screened (API failure,
+            # not a real "no damage" verdict) — this point can't be trusted
+            # as clean just because nothing else screened positive.
+            return fallback, {"_api_error": f"{len(screen_errors)}/{len(street_images)} image screens failed: {screen_errors[0]}"}, False
         return fallback, {
             "feature_type": "other_no_damage",
             "pothole_confirmed": False,
@@ -758,6 +775,16 @@ def main():
 
             best_b64, result, confirmed = identify_pothole_in_images_screened(
                 images, lat, lng, cache=image_screen_cache)
+            if result.get("_api_error"):
+                # A real Vision-API failure (e.g. Anthropic overload), not a
+                # "no damage found" verdict — must not silently look like a
+                # clean point. Previously this fell through as a low-info
+                # candidate ("clear, but flagged as candidate (?)") while the
+                # run's own error count stayed at 0, so a scan that was half
+                # API failures looked, at a glance, like a clean scan.
+                print(f"Vision API error, not evaluated: {result['_api_error']}")
+                errors.append({"lat": lat, "lng": lng, "stage": "vision", "message": result["_api_error"]})
+                continue
             points_scanned += 1
             low_confidence = confirmed and result.get("confidence_visual", 0) < MIN_CONFIDENCE
             if low_confidence:

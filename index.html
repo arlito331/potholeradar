@@ -30,6 +30,8 @@ a{color:inherit;}
 .gear-btn:hover{opacity:1;}
 .gear-dot{position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:var(--red);}
 .gear-dot.ok{background:#4ADE80;}
+.gear-dot.optional{background:var(--dim);} /* unset-but-not-required, unlike the GitHub token dot */
+.gear-dot.optional.ok{background:#4ADE80;}
 .btn{background:var(--accent);color:#fff;border:none;border-radius:5px;padding:8px 16px;font-size:11px;font-weight:700;letter-spacing:0.5px;cursor:pointer;}
 .btn:hover{background:#3369c4;}
 .btn.secondary{background:transparent;border:1px solid var(--border);color:var(--muted);}
@@ -111,6 +113,9 @@ a{color:inherit;}
     <div class="header-title">Area Scanner</div>
     <div class="header-sub">Search a place → adjust radius → boom</div>
   </div>
+  <button class="gear-btn" id="placesGear" onclick="promptForPlacesKey()" title="Google Places API key settings">
+    <span class="gear-dot optional" id="placesGearDot"></span>📍
+  </button>
   <button class="gear-btn" id="tokenGear" onclick="promptForToken()" title="GitHub token settings">
     <span class="gear-dot" id="tokenGearDot"></span>⚙️
   </button>
@@ -626,6 +631,17 @@ function clearSearchResults(){ document.getElementById('searchResults').innerHTM
 
 let lastSearchResults = [];
 
+// Any action that moves the "you are here" point to a brand new place needs
+// to drop whatever was selected at the OLD place too — otherwise a leftover
+// street-mode route, or a stale results mini-map from a previous scan,
+// stays on screen looking like it belongs to the new location.
+function resetSelectionForNewLocation(){
+  clearScanStatus();
+  routeStart = null; routeEnd = null; selectedRoute = null;
+  if (routeOverlay) { streetLayerGroup.removeLayer(routeOverlay); routeOverlay = null; }
+  if (scanMode === 'street') loadStreetsInView();
+}
+
 function applySearchResult(r){
   const latlng = [parseFloat(r.lat), parseFloat(r.lon)];
   scanMap.setView(latlng, 17);
@@ -634,7 +650,7 @@ function applySearchResult(r){
   lastSearchLabel = r.display_name.split(',').slice(0,3).join(',');
   updateSearchHint();
   clearSearchResults();
-  clearScanStatus();
+  resetSelectionForNewLocation();
 }
 window.applySearchResult = applySearchResult;
 
@@ -645,6 +661,35 @@ function renderSearchResults(results){
       <strong>${r.name || r.display_name.split(',')[0]}</strong><br/>
       <span style="color:var(--dim);">${r.display_name}</span>
     </div>`).join('');
+}
+
+// Google's Places index covers named businesses (a specific pharmacy
+// branch, a hotel, a store) far more completely than OpenStreetMap does in
+// most of Latin America — Nominatim is fine for streets/neighborhoods but
+// routinely has nothing for "Farmacias Arrocha" or similar chains. Used
+// only when the user has set an API key (see promptForPlacesKey); returns
+// results already normalized to the same {lat, lon, display_name, name}
+// shape Nominatim uses, so nothing downstream needs to know which source
+// answered.
+async function searchPlacesGoogle(query, country){
+  const key = getPlacesKey();
+  if (!key) return null;
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': key,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location',
+    },
+    body: JSON.stringify({ textQuery: `${query}, ${country}` }),
+  });
+  if (!res.ok) throw new Error(`Places API HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.places || []).map(p => ({
+    lat: p.location.latitude, lon: p.location.longitude,
+    name: p.displayName && p.displayName.text,
+    display_name: [p.displayName && p.displayName.text, p.formattedAddress].filter(Boolean).join(', '),
+  }));
 }
 
 async function searchPlace(){
@@ -662,18 +707,30 @@ async function searchPlace(){
     scanCircle.setLatLng([lat,lng]);
     lastSearchLabel = `Exact coordinates (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
     updateSearchHint();
-    clearScanStatus();
+    resetSelectionForNewLocation();
     return;
   }
 
   hint.textContent = 'Searching…';
+  let results = null, usedPlaces = false;
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', ' + country)}&format=json&limit=5`
-    );
-    const results = await res.json();
+    results = await searchPlacesGoogle(query, country);
+    usedPlaces = !!results;
+  } catch (e){
+    results = null; // Places call failed — fall through to OpenStreetMap below
+  }
+  try {
+    if (!results || !results.length){
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', ' + country)}&format=json&limit=5`
+      );
+      results = await res.json();
+      usedPlaces = false;
+    }
     if (!results.length){
-      hint.textContent = `No results for "${query}" — try a different search, or click the map directly.`;
+      hint.textContent = usedPlaces
+        ? `No results for "${query}" — try a different search, or click the map directly.`
+        : `No results for "${query}" — try a different search, click the map directly, or add a Google Places API key (📍 above) for better business/landmark search.`;
       return;
     }
     if (results.length === 1){
@@ -693,6 +750,8 @@ async function searchPlace(){
 
 function getGhToken(){ return localStorage.getItem('pr_gh_token'); }
 function setGhToken(t){ localStorage.setItem('pr_gh_token', t); }
+function getPlacesKey(){ return localStorage.getItem('pr_places_key'); }
+function setPlacesKey(k){ localStorage.setItem('pr_places_key', k); }
 
 function refreshTokenBar(){
   const dot = document.getElementById('tokenGearDot');
@@ -701,6 +760,30 @@ function refreshTokenBar(){
   dot.classList.toggle('ok', ok);
   gear.title = ok ? 'GitHub token saved — click to change' : 'GitHub token not set — click to add one (required to trigger scans)';
 }
+
+function refreshPlacesBar(){
+  const dot = document.getElementById('placesGearDot');
+  const gear = document.getElementById('placesGear');
+  const ok = !!getPlacesKey();
+  dot.classList.toggle('ok', ok);
+  gear.title = ok
+    ? 'Google Places API key saved — click to change (used for business/landmark search; falls back to OpenStreetMap search without it)'
+    : 'No Google Places API key — search falls back to OpenStreetMap, which often misses named businesses. Click to add a key.';
+}
+
+function promptForPlacesKey(){
+  const t = prompt(
+    'Paste a Google Places API key (Places API New, HTTP-referrer restricted to this site).\n' +
+    'Stored only in this browser (localStorage), never sent anywhere except places.googleapis.com.\n\n' +
+    'Optional — without one, place search falls back to OpenStreetMap, which is fine for streets/neighborhoods ' +
+    'but often misses named businesses like a specific pharmacy or hotel branch.\n\n' +
+    'Leave blank and press OK to remove a saved key.'
+  );
+  if (t === null) return;
+  if (t.trim()) setPlacesKey(t.trim()); else localStorage.removeItem('pr_places_key');
+  refreshPlacesBar();
+}
+window.promptForPlacesKey = promptForPlacesKey;
 
 function promptForToken(){
   const t = prompt('Paste a GitHub personal access token with "repo" + "workflow" scope.\nStored only in this browser (localStorage), never sent anywhere except api.github.com.');
@@ -1171,6 +1254,7 @@ window.searchPlace = searchPlace;
 window.onRadiusInput = onRadiusInput;
 
 refreshTokenBar();
+refreshPlacesBar();
 initScanMap();
 onRadiusInput();
 </script>

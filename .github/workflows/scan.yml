@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: ''
+      spacing_m:
+        description: 'Distance between sample points in meters — leave blank for the default (15m)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   scan:
@@ -56,6 +61,7 @@ jobs:
           GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
           GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          SPACING_M: ${{ inputs.spacing_m }}
         run: |
           python potholeradar.py \
             --country "${{ inputs.country }}" \
@@ -64,6 +70,7 @@ jobs:
             --max-points "${{ inputs.max_points }}" \
             --lat "${{ inputs.lat }}" \
             --lng "${{ inputs.lng }}" \
+            ${SPACING_M:+--spacing-m "$SPACING_M"} \
             --street-path '${{ inputs.street_path }}'
       - name: Commit scan report
         if: always()

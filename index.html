@@ -221,6 +221,7 @@ a{color:inherit;}
   <div id="detailSection" style="display:none;">
     <div style="display:flex;gap:10px;margin-bottom:14px;">
       <button class="btn secondary" onclick="backToOverview()">← Back to overview</button>
+      <button class="btn secondary" onclick="viewScanPDF(currentDetailScan)">👁 View PDF Report</button>
       <button class="btn" onclick="downloadScanPDF(currentDetailScan)">📄 Download PDF Report</button>
     </div>
     <div class="card" style="padding:0;overflow:hidden;">
@@ -709,12 +710,14 @@ async function runScan(){
     }
 
     if (run.conclusion === 'success'){
-      setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
+      setStatus('success', '✅ Scan complete', `<a href="#" onclick="switchTab('coverage');return false;">View on Coverage Map →</a> · <a href="#" id="pdfViewLink">View PDF</a> · <a href="#" id="pdfLink">Download PDF Report</a>`);
       fetchLatestScanFresh(dispatchTime)
         .then(scan => {
           if (!scan) return; // gave up after retries — raw.githubusercontent.com hadn't caught up; Coverage Map tab will have it
           const link = document.getElementById('pdfLink');
           if (link) link.onclick = (e) => { e.preventDefault(); downloadScanPDF(scan); };
+          const viewLink = document.getElementById('pdfViewLink');
+          if (viewLink) viewLink.onclick = (e) => { e.preventDefault(); viewScanPDF(scan); };
           renderResultsMiniMap(scan);
         })
         .catch(()=>{});
@@ -776,7 +779,7 @@ function scanAreaLabel(s){
 
 // ═══════════════════════════ PDF REPORT ═══════════════════════════
 
-function downloadScanPDF(scan){
+function buildScanPDF(scan){
   const { jsPDF } = window.jspdf;
   const W = 612, H = 792, M = 40; // US Letter, portrait
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: [W, H] });
@@ -875,9 +878,18 @@ function downloadScanPDF(scan){
   text('POWERFIX · REPAIR. REINVENTED.', M, 8, ACCENT, 'bold');
   text('PotholeRadar v1.2 — proactive area sweep, no prior report required.', M, 8, DIM); y += 12;
 
-  doc.save(`PotholeRadar_${scan.scan_id}.pdf`);
+  return doc;
+}
+
+function downloadScanPDF(scan){
+  buildScanPDF(scan).save(`PotholeRadar_${scan.scan_id}.pdf`);
+}
+function viewScanPDF(scan){
+  const doc = buildScanPDF(scan);
+  window.open(doc.output('bloburl'), '_blank');
 }
 window.downloadScanPDF = downloadScanPDF;
+window.viewScanPDF = viewScanPDF;
 
 function renderCoverageMap(){
   const el = document.getElementById('coverage-map');

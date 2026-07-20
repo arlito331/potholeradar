@@ -1333,5 +1333,13 @@ refreshPlacesBar();
 initScanMap();
 onRadiusInput();
 </script>
+<style>
+#hubBtn{position:fixed;bottom:18px;right:18px;z-index:9999;width:42px;height:42px;border-radius:50%;background:#E8442A;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.45);opacity:.9;transition:transform .15s,opacity .15s;}
+#hubBtn:hover{transform:scale(1.08);opacity:1;}
+#hubBtn svg{width:19px;height:19px;}
+</style>
+<a id="hubBtn" href="https://developers.powerfixinc.com/" title="PowerFix Hub">
+  <svg viewBox="0 0 24 24" fill="#fff"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+</a>
 </body>
 </html>
